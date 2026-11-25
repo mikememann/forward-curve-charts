@@ -19,8 +19,11 @@ test("chart defaults on 25 Nov 2026 match the configured contracts", () => {
   assert.equal(ticker("wheat", on).ticker, "ZWZ26.CBT");
   assert.equal(ticker("wheat", on).contractLabel, "Dec 2026");
   assert.equal(ticker("corn", on).ticker, "ZCH27.CBT");
-  assert.equal(ticker("cocoa", on).ticker, "CCH27.NYB");
-  assert.equal(ticker("sugar", on).ticker, "SBH27.NYB");
+  assert.equal(ticker("cocoa", on).sourceKind, "ice");
+  assert.equal(ticker("cocoa", on).units, "GBP/t");
+  assert.equal(ticker("cocoa", on).ice?.productId, 15246);
+  assert.equal(ticker("sugar", on).sourceKind, "ice");
+  assert.equal(ticker("sugar", on).units, "USD/t");
   assert.equal(ticker("gold", on).ticker, "GC=F");
   assert.equal(ticker("gold", on).contractTicker, "GCZ26.CMX");
   assert.equal(ticker("ttf", on).ticker, "TTF=F");
@@ -44,5 +47,8 @@ test("EBM=F is excluded and the layout keeps unavailable rows uncharted", () => 
 
 test("curves cover the futures book plus WTI and Henry Hub", () => {
   const ids = allCurves().map((c) => c.id).sort();
-  assert.deepEqual(ids, ["brent", "cocoa", "corn", "gold", "hh", "sugar", "ttf", "wheat", "wti"]);
+  assert.deepEqual(ids, ["brent", "cocoa", "corn", "gold", "hh", "robusta", "sugar", "ttf", "uk-wheat", "wheat", "wti"]);
+  assert.equal(allCurves().find((c) => c.id === "cocoa")?.ice, true);
+  assert.equal(catalog().some((m) => m.id === "uk-wheat" && m.source === "ice"), true);
+  assert.equal(unavailableSeries.some((u) => u.id === "uk-wheat" || u.id === "white-sugar" || u.id === "london-cocoa-exact"), false);
 });

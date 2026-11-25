@@ -54,6 +54,7 @@ export function ChartWorkspace() {
   const [armClear, setArmClear] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [retry, setRetry] = useState(0);
+  const [iceStrip, setIceStrip] = useState("front");
   const listed = useMemo(() => (hydrated ? presentMarkets() : []), [hydrated]);
 
   useEffect(() => {
@@ -68,9 +69,11 @@ export function ChartWorkspace() {
     const picked = presentMarkets().find((m) => m.id === id);
     setSeriesMode(picked?.preferContinuous ? "continuous" : "contract");
     setTimeframe(tf === "15m" || tf === "1h" || tf === "1d" || tf === "1w" ? tf : prefs?.timeframe || "1h");
-    if (prefs?.chartType) setChartType(prefs.chartType);
+    if (picked?.sourceKind === "ice") setChartType("line");
+    else if (prefs?.chartType) setChartType(prefs.chartType);
     if (prefs?.logScale) setLogScale(true);
     if (prefs?.show) setShow({ ...DEFAULT_TOGGLES, ...prefs.show });
+    setIceStrip(url.get("strip") || "front");
     if (url.get("view") === "curve") setView("curve");
     setHydrated(true);
   }, []);
@@ -89,8 +92,9 @@ export function ChartWorkspace() {
     p.set("m", marketId);
     p.set("tf", timeframe);
     if (view === "curve") p.set("view", "curve");
+    if (iceStrip) p.set("strip", iceStrip);
     window.history.replaceState(null, "", `?${p}`);
-  }, [hydrated, marketId, timeframe, chartType, logScale, show, custom, spreads, view]);
+  }, [hydrated, marketId, timeframe, chartType, logScale, show, custom, spreads, view, iceStrip]);
 
   const viewModel = useMemo(() => {
     return listed.find((m) => m.id === marketId) ?? customView(custom.find((c) => `custom:${c.ticker}` === marketId));
@@ -153,6 +157,7 @@ export function ChartWorkspace() {
     const q = spreadNow
       ? new URLSearchParams({ formula: spreadNow.formula, timeframe })
       : new URLSearchParams({ ticker, timeframe, market: viewModel?.id.startsWith("custom:") ? "" : viewModel?.id ?? "" });
+    if (!spreadNow && viewModel?.sourceKind === "ice" && iceStrip) q.set("strip", iceStrip);
     fetch(`/api/ohlc?${q}`, { signal: ctrl.signal })
       .then(async (res) => {
         const body = (await res.json()) as OhlcResponse;
@@ -173,7 +178,7 @@ export function ChartWorkspace() {
       live = false;
       ctrl.abort();
     };
-  }, [hydrated, ticker, timeframe, viewModel?.id, retry, marketId, spreads]);
+  }, [hydrated, ticker, timeframe, viewModel?.id, viewModel?.sourceKind, retry, marketId, spreads, iceStrip]);
 
   useEffect(() => {
     if (!hydrated || view !== "curve") return;
@@ -245,8 +250,10 @@ export function ChartWorkspace() {
 
   function selectMarket(id: string) {
     setMarketId(id);
+    setIceStrip("front");
     setNavOpen(false);
     const m = listed.find((x) => x.id === id);
+    if (m?.sourceKind === "ice") setChartType("line");
     if (m?.intradayOnly && (timeframe === "1d" || timeframe === "1w")) setTimeframe("1h");
     if (view === "curve" && (!m || !m.curveId)) setView("chart");
   }
@@ -258,7 +265,13 @@ export function ChartWorkspace() {
   const bar = hover ?? payload?.bars[payload.bars.length - 1] ?? null;
   const decimals = quote?.decimals ?? (payload?.pence ? 2 : 2);
   const shownTicker = spread?.formula || ticker;
-  const showingThis = !unavailable && payload != null && payload.ticker === shownTicker;
+  const showingThis = !unavailable && payload != null && (
+    (payload.marketId != null && payload.marketId === (spread?.id ?? viewModel?.id))
+    || payload.ticker === shownTicker
+  );
+  const monthLabel = showingThis && payload?.contractLabel
+    ? payload.contractLabel
+    : seriesMode === "contract" ? viewModel?.contractLabel : null;
   const headerPrice = unavailable ? null : quote?.stale || payload?.stale ? null : quote?.last ?? (showingThis ? payload?.lastPrice ?? null : null);
   const trade = drawings.find((d): d is TradeDrawing => d.type === "trade");
 
@@ -304,7 +317,7 @@ export function ChartWorkspace() {
           <div className="title-block">
             <h1>
               {unavailable?.name ?? spread?.name ?? viewModel?.name ?? "Chart"}
-              {seriesMode === "contract" && viewModel?.contractLabel ? <span> · {viewModel.contractLabel}</span> : null}
+              {monthLabel ? <span> · {monthLabel}</span> : null}
               {seriesMode === "continuous" ? <span> · continuous</span> : null}
             </h1>
             <p className="ticker-line">
@@ -338,6 +351,30 @@ export function ChartWorkspace() {
             ))}
           </div>
           <button className={`toggle ${logScale ? "on" : ""}`} type="button" onClick={() => setLogScale((v) => !v)}>Log</button>
+          {payload?.iceContracts && payload.iceContracts.length > 0 && showingThis && (
+            <label className="compare">
+              Contract
+              <select value={iceStrip || payload.iceStrip || "front"} onChange={(e) => { setIceStrip(e.target.value); setView("chart"); }}>
+                <option value="front">Front</option>
+                {payload.iceContracts.map((c) => (
+                  <option key={c.marketId} value={c.strip}>{c.label}{c.nearExpiry ? " · expiring" : ""}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {viewModel?.ice?.compareMarketId && (
+            <button
+              className={`toggle ${compareIds.includes(viewModel.ice.compareMarketId) ? "on" : ""}`}
+              type="button"
+              title="Yahoo true OHLC, rebased to the start of the window. Different contract and units."
+              onClick={() => {
+                const id = viewModel.ice?.compareMarketId;
+                if (!id) return;
+                setCompareIds((xs) => xs.includes(id) ? xs.filter((x) => x !== id) : xs.length >= 3 ? xs : [...xs, id]);
+                setView("chart");
+              }}
+            >{viewModel.ice.compareLabel ?? "Compare OHLC"}</button>
+          )}
           {viewModel?.continuous && viewModel.contractTicker && (
             <div className="seg">
               <button className={seriesMode === "contract" ? "on" : ""} type="button" onClick={() => setSeriesMode("contract")}>{viewModel.contractLabel}</button>
@@ -433,8 +470,10 @@ export function ChartWorkspace() {
                   {viewModel.attribution ? ` · ${viewModel.attribution}` : ""}
                 </p>
               )}
-              {viewModel?.infoNote && <p className="banner">{viewModel.infoNote}</p>}
+              {(payload?.infoNote || viewModel?.infoNote) && <p className="banner">{showingThis && payload?.infoNote ? payload.infoNote : viewModel?.infoNote}</p>}
               {viewModel?.proxyNote && <p className="banner warn"><b>Proxy.</b> {viewModel.proxyNote}</p>}
+              {showingThis && payload?.proxyNote && payload.proxyNote !== viewModel?.proxyNote && <p className="banner warn"><b>Stand-in.</b> {payload.proxyNote}</p>}
+              {showingThis && payload?.warnings.map((w) => <p key={w} className="banner warn">{w}</p>)}
               {spread && payload?.infoNote && <p className="banner">{payload.infoNote}</p>}
               {seriesMode === "continuous" && <p className="banner warn"><b>Back-adjusted continuous {ticker}.</b> Yahoo splices the rolls, so levels and percentage changes will not match the specific contract.</p>}
               {viewModel?.pence && <p className="banner">Quoted in pence (p), not pounds.</p>}
@@ -534,7 +573,11 @@ export function ChartWorkspace() {
             {curve && curve.id === curveId && <CurveView data={curve} />}
           </div>
         )}
-        <footer className="foot">Public Yahoo Finance data, delayed. Not IG, not a point conversion, not advice.</footer>
+        <footer className="foot">
+          {showingThis && payload?.source === "ICE"
+            ? "ICE charting data is delayed, free to view for personal use, and not for redistribution. Not IG, not advice."
+            : "Public Yahoo Finance data, delayed. Not IG, not a point conversion, not advice."}
+        </footer>
       </main>
     </div>
   );
@@ -689,6 +732,8 @@ function customView(c: CustomSymbol | undefined): MarketView | null {
     nativeFrequency: null,
     requiresEnv: null,
     delayNote: null,
+    ice: null,
+    iceFallback: null,
   };
 }
 

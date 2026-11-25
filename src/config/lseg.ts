@@ -5,7 +5,7 @@
  *
  * EBM=F is Micro Bitcoin Euro. It is not Euronext wheat and is not used.
  */
-import type { Market, UnavailableSeries } from "@/config/markets";
+import { ICE_LICENCE, type Market, type UnavailableSeries } from "@/config/markets";
 
 const YAHOO = "Yahoo terms: free to view, personal use, no redistribution";
 const FRED = "Public domain (FRED / source agency)";
@@ -391,7 +391,7 @@ export const lsegMarkets: Market[] = [
     attribution: "Yahoo Finance",
     contract: { root: "CC", venue: "NYB", months: "HKNUZ", expiryMonthOffset: 0, expiryDay: 15, minDaysToExpiry: 25 },
     continuous: "CC=F",
-    infoNote: "This is NY cocoa itself. The IG row 'London Cocoa' is the same Yahoo contract used as a proxy for London, which is a different market.",
+    infoNote: "This is NY cocoa itself, in USD/t. London cocoa is now the ICE Europe contract in GBP/t. The two are not the same market and are not converted into each other.",
   },
   {
     id: "arabica",
@@ -412,18 +412,35 @@ export const lsegMarkets: Market[] = [
     id: "robusta",
     name: "Robusta coffee",
     group: "LSEG · Cocoa",
-    units: "USc/lb",
-    assetClass: "macro",
-    decimals: 2,
-    exactness: "proxy",
+    units: "USD/t",
+    assetClass: "future",
+    decimals: 0,
+    ticker: "ICE:RC",
+    exactness: "exact",
     ric: "LRCc1",
-    source: "fred",
-    seriesId: "PCOFFROBUSDM",
-    nativeFrequency: "1mo",
-    licence: FRED,
-    attribution: "FRED, IMF primary commodity prices",
-    delayNote: "Monthly IMF average.",
-    proxyNote: "IMF monthly robusta in US cents per pound. Not ICE Europe robusta in USD per tonne. RC=F and RM=F are not on Yahoo.",
+    source: "ice",
+    ice: {
+      specId: 37089079,
+      productId: 15247,
+      hubId: 17451,
+      label: "ICE Robusta Coffee, delayed, close-based, USD/t",
+      compareMarketId: "arabica",
+      compareLabel: "Coffee C OHLC",
+    },
+    iceFallback: {
+      kind: "fred",
+      seriesId: "PCOFFROBUSDM",
+      nativeFrequency: "1mo",
+      units: "USc/lb",
+      note: "ICE robusta did not load. This is the old stand-in: the IMF monthly average in US cents per pound, not ICE Europe robusta in USD per tonne.",
+    },
+    licence: ICE_LICENCE,
+    attribution: "ICE Futures Europe",
+    delayNote: "Delayed. Close-only.",
+    infoNote: "ICE Robusta Coffee, delayed, close-based, USD/t. Coffee C (KC) is arabica, a different contract, offered only as an optional true-OHLC comparison. The IMF monthly series is the fallback if ICE does not answer. These endpoints are undocumented and may change.",
+    curve: {
+      note: "ICE robusta (USD/t), delayed lasts. Months the charting list does not return are absent. Not the IMF monthly average.",
+    },
   },
   {
     id: "cot-sugar",
@@ -797,15 +814,37 @@ export const lsegMarkets: Market[] = [
     attribution: "Yahoo Finance",
     infoNote: "London Stock Exchange Group shares, in pence. Not a guarantee-of-origin price.",
   },
+  {
+    id: "uk-wheat",
+    name: "UK Feed Wheat",
+    group: "LSEG · Main",
+    units: "GBP/t",
+    assetClass: "future",
+    decimals: 1,
+    ticker: "ICE:T",
+    exactness: "exact",
+    ric: "LWBc1",
+    source: "ice",
+    ice: {
+      specId: 37089081,
+      productId: 15248,
+      hubId: 17452,
+      label: "ICE UK Feed Wheat, delayed, close-based, GBP/t",
+    },
+    licence: ICE_LICENCE,
+    attribution: "ICE Futures Europe",
+    delayNote: "Delayed. Close-only.",
+    infoNote: "ICE UK Feed Wheat, delayed, close-based, GBP/t. Intraday prints are often sparse. Chicago wheat is a different contract and is not used when this feed is down. These endpoints are undocumented and may change.",
+    curve: {
+      note: "ICE UK feed wheat (GBP/t), delayed lasts. The spec lists more delivery months than the charting contract list returns. Missing months are absent, and Chicago wheat is not filled in.",
+    },
+  },
 ];
 
 export const unavailableSeries: UnavailableSeries[] = [
-  { id: "white-sugar", name: "London white sugar No.5", group: "LSEG · Main", ric: "LSUH7", licence: "Free to view only", reason: "No free machine-readable feed. ICE and Barchart pages are view-only, and Yahoo has no SW ticker (SW=F 404s). Sugar No.11 is charted separately and is not this contract." },
-  { id: "london-cocoa-exact", name: "London cocoa (GBP/t)", group: "LSEG · Cocoa", ric: "LCCc1", licence: "Free to view only", reason: "No free API. The IG cocoa row is NY cocoa in USD/t, a proxy, not London cocoa. Depth of book has no free source." },
   { id: "cocoa-stocks", name: "ICE cocoa certified stocks", group: "LSEG · Cocoa", ric: "COC-ARW-CI", licence: "Free to view only", reason: "ICE Report Center stocks are a manual download, not an API this app can chart." },
   { id: "cocoa-products", name: "Cocoa butter, liquor, powder", group: "LSEG · Cocoa", ric: "RFVCBLEUMKst1", licence: "Proprietary", reason: "Price-reporting assessments. No free source, so nothing is plotted." },
   { id: "cocoa-ratios", name: "Cocoa butter and liquor ratios", group: "LSEG · Cocoa", ric: "RFVCBLEURAMKst", licence: "Proprietary", reason: "Broker and PRA ratios. No free source." },
-  { id: "uk-wheat", name: "UK feed wheat", group: "LSEG · Main", ric: "LWBX6", licence: "Free to view (AHDB)", reason: "AHDB and ICE pages are view-only. No free API. Chicago wheat is a different contract and is not substituted." },
   { id: "matif-wheat", name: "Euronext milling wheat", group: "LSEG · Main", ric: "BL2c1", licence: "Free to view only", reason: "Euronext is view-only. Yahoo's EBM=F is Micro Bitcoin Euro, not wheat, and is excluded. Chicago wheat is not used as a stand-in." },
   { id: "matif-corn", name: "Euronext corn", group: "LSEG · Main", ric: "EMAc1", licence: "Free to view only", reason: "No free API (EMA=F 404s). CBOT corn is a different market and is not substituted." },
   { id: "rapeseed", name: "Euronext rapeseed", group: "LSEG · Main", ric: "COMc1", licence: "Free to view only", reason: "No free API (ECO=F 404s). The curve would have to be scraped expiry by expiry. Soybeans are not a substitute." },

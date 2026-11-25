@@ -81,7 +81,13 @@ export function lastSma(closes: number[], n: number): number | null {
   return sum / n;
 }
 
-export function enrich(bars: Bar[]): EnrichedBar[] {
+/**
+ * `closeOnly` is for a feed that publishes the close and nothing else.
+ * SMA, Bollinger, RSI and MACD still use that close. Stochastic, ATR and
+ * Ichimoku need a high and a low, so they are left empty rather than
+ * computed from a made-up range.
+ */
+export function enrich(bars: Bar[], opts?: { closeOnly?: boolean }): EnrichedBar[] {
   const close = bars.map((b) => b.close);
   const high = bars.map((b) => b.high);
   const low = bars.map((b) => b.low);
@@ -144,6 +150,7 @@ export function enrich(bars: Bar[]): EnrichedBar[] {
     const rsi = au[i] == null || ad[i] == null ? null : (ad[i] as number) === 0 ? 100 : 100 - 100 / (1 + (au[i] as number) / (ad[i] as number));
     const mid = sma20[i];
     const s = sd[i];
+    const closeOnly = Boolean(opts?.closeOnly);
     return {
       ...b,
       sma20: round(mid),
@@ -153,16 +160,16 @@ export function enrich(bars: Bar[]): EnrichedBar[] {
       bbUpper: round(mid == null || s == null ? null : mid + 2 * s),
       bbLower: round(mid == null || s == null ? null : mid - 2 * s),
       rsi14: round(rsi, 4),
-      stochK: round(slowK[i], 4),
-      stochD: round(slowD[i], 4),
-      atr14: round(atr[i]),
+      stochK: closeOnly ? null : round(slowK[i], 4),
+      stochD: closeOnly ? null : round(slowD[i], 4),
+      atr14: closeOnly ? null : round(atr[i]),
       macd: round(macdLine[i]),
       macdSignal: round(signal[i]),
       macdHist: round(macdLine[i] == null || signal[i] == null ? null : (macdLine[i] as number) - (signal[i] as number)),
-      tenkan: round(tenkan[i]),
-      kijun: round(kijun[i]),
-      spanA: round(spanA[i]),
-      spanB: round(spanB[i]),
+      tenkan: closeOnly ? null : round(tenkan[i]),
+      kijun: closeOnly ? null : round(kijun[i]),
+      spanA: closeOnly ? null : round(spanA[i]),
+      spanB: closeOnly ? null : round(spanB[i]),
     };
   });
 }
