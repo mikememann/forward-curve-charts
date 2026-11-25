@@ -1,5 +1,10 @@
-import { extraCurves, markets, type ExtraCurve, type Market } from "@/config/markets";
+import { extraCurves, markets, type Exactness, type ExtraCurve, type Market, type NativeFrequency, type SourceKind } from "@/config/markets";
+import { lsegMarkets } from "@/config/lseg";
 import { resolveContract, type ContractInfo } from "@/lib/contracts";
+
+export function catalog(): Market[] {
+  return [...markets, ...lsegMarkets];
+}
 
 export interface CurveDef {
   id: string;
@@ -31,11 +36,24 @@ export interface MarketView {
   hideStale: boolean;
   decimals: number;
   curveId: string | null;
+  alsoIn: Market["alsoIn"] | null;
+  sourceKind: SourceKind;
+  seriesId: string | null;
+  licence: string | null;
+  attribution: string | null;
+  exactness: Exactness | null;
+  ric: string | null;
+  infoNote: string | null;
+  dailyOnly: boolean;
+  intradayOnly: boolean;
+  nativeFrequency: NativeFrequency | null;
+  requiresEnv: string | null;
+  delayNote: string | null;
 }
 
 export function allCurves(): CurveDef[] {
   const fromMarkets: CurveDef[] = [];
-  for (const m of markets) {
+  for (const m of catalog()) {
     if (!m.curve) continue;
     const spec = m.curve.spec ?? m.contract;
     if (!spec) continue;
@@ -86,21 +104,34 @@ export function presentMarket(m: Market, now = new Date()): MarketView {
     hideStale: Boolean(m.hideStale),
     decimals: m.decimals ?? 2,
     curveId: m.curve ? m.id : null,
+    alsoIn: m.alsoIn ?? null,
+    sourceKind: m.source ?? "yahoo",
+    seriesId: m.seriesId ?? null,
+    licence: m.licence ?? null,
+    attribution: m.attribution ?? null,
+    exactness: m.exactness ?? null,
+    ric: m.ric ?? null,
+    infoNote: m.infoNote ?? null,
+    dailyOnly: Boolean(m.dailyOnly),
+    intradayOnly: Boolean(m.intradayOnly),
+    nativeFrequency: m.nativeFrequency ?? null,
+    requiresEnv: m.requiresEnv ?? null,
+    delayNote: m.delayNote ?? null,
   };
 }
 
 export function presentMarkets(now = new Date()): MarketView[] {
-  return markets.map((m) => presentMarket(m, now));
+  return catalog().map((m) => presentMarket(m, now));
 }
 
 export function findMarket(id: string, now = new Date()): MarketView | null {
-  const m = markets.find((x) => x.id === id);
+  const m = catalog().find((x) => x.id === id);
   return m ? presentMarket(m, now) : null;
 }
 
 export function findMarketByTicker(ticker: string, now = new Date()): MarketView | null {
   const upper = ticker.toUpperCase();
-  for (const m of markets) {
+  for (const m of catalog()) {
     const view = presentMarket(m, now);
     if (
       view.ticker.toUpperCase() === upper ||

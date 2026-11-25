@@ -1,4 +1,6 @@
 import "server-only";
+import { DataError } from "@/lib/errors";
+import { loadExternal } from "@/lib/sources";
 import { bucketBars } from "@/lib/bucket";
 import { previousFromChange } from "@/lib/format";
 import { delayNoteFor, presentMarkets, type MarketView } from "@/lib/marketModel";
@@ -41,6 +43,19 @@ async function quoteForCustom(ticker: string): Promise<Quote> {
     hideStale: false,
     decimals: 2,
     curveId: null,
+    alsoIn: null,
+    sourceKind: "yahoo",
+    seriesId: null,
+    licence: null,
+    attribution: null,
+    exactness: null,
+    ric: null,
+    infoNote: null,
+    dailyOnly: false,
+    intradayOnly: false,
+    nativeFrequency: null,
+    requiresEnv: null,
+    delayNote: null,
   };
   try {
     const q = await buildQuote(ticker, stub);
@@ -52,6 +67,39 @@ async function quoteForCustom(ticker: string): Promise<Quote> {
 }
 
 async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
+  if (view.requiresEnv && !process.env[view.requiresEnv]) {
+    return blank(view, `Off until ${view.requiresEnv} is set. No figure is shown without it.`);
+  }
+  if (view.sourceKind !== "yahoo") {
+    try {
+      const loaded = await loadExternal(
+        {
+          source: view.sourceKind,
+          seriesId: view.seriesId ?? undefined,
+          ticker: view.ticker,
+          name: view.name,
+          nativeFrequency: view.nativeFrequency ?? undefined,
+          requiresEnv: view.requiresEnv ?? undefined,
+        },
+        "1d",
+      );
+      const bars = loaded.bars;
+      const lastBar = bars.at(-1);
+      const prev = bars.at(-2);
+      const base = shell(view, loaded.sourceLabel);
+      base.last = lastBar?.close ?? null;
+      base.asOfUnix = lastBar?.time ?? null;
+      base.lastUpdatedLabel = lastBar ? formatLondon(lastBar.time, "date") : null;
+      if (lastBar && prev && prev.close !== 0) {
+        base.change = lastBar.close - prev.close;
+        base.changePct = (base.change / Math.abs(prev.close)) * 100;
+        base.changeBasis = view.nativeFrequency === "1mo" ? "previous month" : view.nativeFrequency === "1w" ? "previous week" : "previous observation";
+      }
+      return base;
+    } catch (e) {
+      return blank(view, e instanceof DataError ? e.message : e instanceof Error ? e.message : "Couldn't load");
+    }
+  }
   const interval = view.fxClose22 ? "1h" : "1d";
   const chart = await yahooChart(ticker, interval, "10d");
   const bars = bucketBars(chart.bars, view.fxClose22 ? "1h" : "1d");
@@ -59,33 +107,20 @@ async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
     throw new YahooError(`No quote for ${ticker}`, ticker);
   }
   const lastBar = bars[bars.length - 1] ?? null;
-  const asOfUnix = chart.meta.regularMarketTime ?? lastBar?.time ?? null;
+  const metaTime = chart.meta.regularMarketTime;
+  const metaFresh = metaTime != null && lastBar != null && lastBar.time - metaTime < 5 * 86_400;
+  const asOfUnix = (metaFresh ? metaTime : lastBar?.time) ?? metaTime ?? null;
   const stale = view.hideStale && isStaleQuote(lastBar?.time ?? asOfUnix);
   const currency = view.pence ? "GBp" : chart.meta.currency;
-  const base: Quote = {
-    id: view.id,
-    ticker,
-    name: chart.meta.shortName && view.group === "Custom" ? chart.meta.shortName : view.name,
-    group: view.group,
-    units: view.units || (view.pence ? "p" : currency || ""),
-    contractLabel: view.preferContinuous ? null : view.contractLabel,
-    proxy: Boolean(view.proxyNote),
-    proxyNote: view.proxyNote,
-    pence: view.pence,
-    decimals: view.decimals,
-    last: null,
-    change: null,
-    changePct: null,
-    changeBasis: null,
-    referenceTimeUnix: null,
-    currency,
-    asOfUnix,
-    lastUpdatedLabel: lastBar ? formatLondon(lastBar.time, "date") : null,
-    stale,
-    delayNote: delayNoteFor(view.assetClass, view.fxClose22),
-    hasCurve: Boolean(view.curveId),
-    error: null,
-  };
+  const base = shell(view, "Yahoo Finance");
+  base.ticker = ticker;
+  base.name = chart.meta.shortName && view.group === "Custom" ? chart.meta.shortName : view.name;
+  base.units = view.units || (view.pence ? "p" : currency || "");
+  base.currency = currency;
+  base.asOfUnix = asOfUnix;
+  base.lastUpdatedLabel = lastBar ? formatLondon(lastBar.time, "date") : null;
+  base.stale = stale;
+  base.delayNote = view.delayNote ?? delayNoteFor(view.assetClass, view.fxClose22);
   if (stale) {
     base.last = null;
     base.change = null;
@@ -93,7 +128,7 @@ async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
     base.changeBasis = null;
     return base;
   }
-  const last = chart.meta.regularMarketPrice ?? lastBar?.close ?? null;
+  const last = (metaFresh ? chart.meta.regularMarketPrice : null) ?? lastBar?.close ?? chart.meta.regularMarketPrice ?? null;
   if (view.fxClose22) {
     const ref = fxSessionReference(bars.map((b) => ({ time: b.time, close: b.close })));
     base.last = last;
@@ -126,16 +161,19 @@ async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
   return base;
 }
 
-function blank(view: MarketView, error: string): Quote {
+function shell(view: MarketView, sourceName: string): Quote {
   return {
     id: view.id,
     ticker: view.ticker,
     name: view.name,
     group: view.group,
     units: view.units,
-    contractLabel: view.contractLabel,
-    proxy: Boolean(view.proxyNote),
+    contractLabel: view.preferContinuous ? null : view.contractLabel,
+    proxy: view.exactness === "proxy" || Boolean(view.proxyNote),
     proxyNote: view.proxyNote,
+    exactness: view.exactness,
+    sourceName,
+    licence: view.licence,
     pence: view.pence,
     decimals: view.decimals,
     last: null,
@@ -147,10 +185,16 @@ function blank(view: MarketView, error: string): Quote {
     asOfUnix: null,
     lastUpdatedLabel: null,
     stale: false,
-    delayNote: delayNoteFor(view.assetClass, view.fxClose22),
+    delayNote: view.delayNote ?? delayNoteFor(view.assetClass, view.fxClose22),
     hasCurve: Boolean(view.curveId),
-    error,
+    error: null,
   };
+}
+
+function blank(view: MarketView, error: string): Quote {
+  const quote = shell(view, view.sourceKind === "yahoo" ? "Yahoo Finance" : view.sourceKind);
+  quote.error = error;
+  return quote;
 }
 
 async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {

@@ -1,6 +1,6 @@
 "use client";
 
-import { GROUPS } from "@/config/markets";
+import { GROUPS, type UnavailableSeries } from "@/config/markets";
 import { formatChange, formatPct, formatPrice } from "@/lib/format";
 import { formatAge } from "@/lib/time";
 import type { Quote } from "@/lib/types";
@@ -21,6 +21,10 @@ interface Props {
   onSelect: (id: string) => void;
   onAdd: (symbol: CustomSymbol) => void;
   onRemove: (ticker: string) => void;
+  unavailable: UnavailableSeries[];
+  spreads: { id: string; name: string; formula: string }[];
+  onAddSpread: (spread: { name: string; formula: string }) => void;
+  onRemoveSpread: (id: string) => void;
 }
 
 export function Watchlist(props: Props) {
@@ -57,6 +61,8 @@ export function Watchlist(props: Props) {
     };
   }, [q]);
 
+  const [spreadName, setSpreadName] = useState("");
+  const [spreadFormula, setSpreadFormula] = useState("");
   const groups = [...GROUPS, "Custom"] as const;
 
   return (
@@ -71,13 +77,14 @@ export function Watchlist(props: Props) {
       <div className="wl-scroll">
         {groups.map((group) => {
           const rows = group === "Custom"
-            ? props.custom.map((c) => ({ id: `custom:${c.ticker}`, name: c.name, sub: c.ticker, removable: c.ticker }))
-            : props.markets.filter((m) => m.group === group).map((m) => {
+            ? props.custom.map((c) => ({ id: `custom:${c.ticker}`, name: c.name, sub: c.ticker, removable: c.ticker, exactness: null as string | null, unavailable: false, reason: "" }))
+            : props.markets.filter((m) => m.group === group || m.alsoIn === group).map((m) => {
                 const quote = props.quotes[m.id];
                 const sub = quote?.contractLabel || (m.preferContinuous ? m.ticker : m.contractLabel ?? m.ticker);
-                return { id: m.id, name: m.name, sub, removable: null as string | null };
+                return { id: m.id, name: m.name, sub, removable: null as string | null, exactness: m.exactness, unavailable: false, reason: "" };
               });
-          if (!rows.length) return null;
+          const missing = props.unavailable.filter((u) => u.group === group);
+          if (!rows.length && !missing.length) return null;
           return (
             <section key={group}>
               <h3>{group}</h3>
@@ -91,7 +98,8 @@ export function Watchlist(props: Props) {
                   <button key={row.id} className={`wl-row ${active ? "active" : ""}`} onClick={() => props.onSelect(row.id)}>
                     <span className="wl-name">
                       <span>{row.name}</span>
-                      {quote?.proxy && <i className="proxy">proxy</i>}
+                      {row.exactness && <i className={`flag ${row.exactness === "near-exact" ? "near" : row.exactness}`}>{row.exactness}</i>}
+                      {quote?.proxy && !row.exactness && <i className="proxy">proxy</i>}
                       {quote?.stale && <i className="stale">stale</i>}
                     </span>
                     <span className="wl-sub">{row.sub}{quote?.units ? ` · ${quote.units}` : ""}</span>
@@ -119,10 +127,42 @@ export function Watchlist(props: Props) {
                   </button>
                 );
               })}
+              {missing.map((row) => (
+                <button key={row.id} className={`wl-row unavailable ${props.selectedId === row.id ? "active" : ""}`} onClick={() => props.onSelect(row.id)}>
+                  <span className="wl-name"><span>{row.name}</span><i className="stale">unavailable</i></span>
+                  <span className="wl-sub">{row.ric ?? "no free feed"}</span>
+                  <span className="wl-px">—</span>
+                  <span className="wl-age">{row.reason}</span>
+                </button>
+              ))}
             </section>
           );
         })}
       </div>
+      <section className="spread-box">
+        <h3>Custom spreads</h3>
+        <p className="spread-help">Spaces around + − * /. Example: brent - wti. WHprem and GasSpread stay blank until you add the formula.</p>
+        {props.spreads.map((s) => (
+          <button key={s.id} className={`wl-row ${props.selectedId === s.id ? "active" : ""}`} onClick={() => props.onSelect(s.id)} type="button">
+            <span className="wl-name">{s.name}</span>
+            <span className="wl-sub">{s.formula}</span>
+            <span className="wl-x" role="button" onClick={(e) => { e.stopPropagation(); props.onRemoveSpread(s.id); }}>remove</span>
+          </button>
+        ))}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!spreadFormula.trim()) return;
+            props.onAddSpread({ name: spreadName.trim() || spreadFormula.trim(), formula: spreadFormula.trim() });
+            setSpreadName("");
+            setSpreadFormula("");
+          }}
+        >
+          <input value={spreadName} placeholder="Name" onChange={(e) => setSpreadName(e.target.value)} />
+          <input value={spreadFormula} placeholder="brent - wti" onChange={(e) => setSpreadFormula(e.target.value)} />
+          <button type="submit">Add spread</button>
+        </form>
+      </section>
       <form
         className="search"
         onSubmit={(e) => {

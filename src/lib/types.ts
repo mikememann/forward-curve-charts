@@ -53,7 +53,11 @@ export interface OhlcResponse {
   contractLabel: string | null;
   continuous: boolean;
   proxyNote: string | null;
-  source: "Yahoo Finance";
+  infoNote: string | null;
+  exactness: string | null;
+  licence: string | null;
+  attribution: string | null;
+  source: string;
   delayNote: string;
   times: "Europe/London";
   fetchedAt: string;
@@ -79,6 +83,9 @@ export interface Quote {
   contractLabel: string | null;
   proxy: boolean;
   proxyNote: string | null;
+  exactness: string | null;
+  sourceName: string | null;
+  licence: string | null;
   pence: boolean;
   decimals: number;
   last: number | null;

@@ -1,6 +1,7 @@
 import "server-only";
-import type { MarketView } from "@/lib/marketModel";
-import { delayNoteFor, findMarketByTicker } from "@/lib/marketModel";
+import { DataError } from "@/lib/errors";
+import { loadExternal } from "@/lib/sources";
+import { delayNoteFor, findMarketByTicker, type MarketView } from "@/lib/marketModel";
 import { bucketBars } from "@/lib/bucket";
 import { enrich, lastSma } from "@/lib/indicators";
 import { formatLondon, isStaleQuote } from "@/lib/time";
@@ -42,10 +43,56 @@ export async function loadOhlc(opts: {
   bars?: number;
   market?: MarketView | null;
 }): Promise<OhlcResponse> {
-  const { ticker, timeframe } = opts;
+  let { ticker, timeframe } = opts;
   const market = opts.market === undefined ? findMarketByTicker(ticker) : opts.market;
   const want = clamp(opts.bars ?? defaultBars(timeframe), 20, 5000);
   const warnings: string[] = [];
+  if (market?.intradayOnly && (timeframe === "1d" || timeframe === "1w")) {
+    throw new DataError(
+      `${market.name} has no daily history on Yahoo (only a few days of intraday bars). Open 15m or 1h. Nothing has been backfilled.`,
+      market.ticker,
+    );
+  }
+  if (market?.requiresEnv && !process.env[market.requiresEnv]) {
+    throw new DataError(
+      `${market.name} is off until ${market.requiresEnv} is set. No figure is shown without that key.`,
+      market.seriesId ?? market.id,
+    );
+  }
+  if (market && market.sourceKind !== "yahoo") {
+    const loaded = await loadExternal(
+      {
+        source: market.sourceKind,
+        seriesId: market.seriesId ?? undefined,
+        ticker: market.ticker,
+        name: market.name,
+        nativeFrequency: market.nativeFrequency ?? undefined,
+        requiresEnv: market.requiresEnv ?? undefined,
+      },
+      timeframe,
+    );
+    warnings.push(...loaded.warnings);
+    const enriched = enrich(loaded.bars);
+    return pack(enriched.slice(-want), {
+      currency: loaded.currency,
+      shortName: loaded.instrumentName,
+      exchangeName: null,
+      instrumentType: null,
+      regularMarketPrice: null,
+    }, {
+      ticker: market.seriesId ?? market.ticker,
+      timeframe,
+      market,
+      sma200Daily: null,
+      warnings: [...warnings, "sma200 on these bars is 200 observations of this series, not a 200-day average."],
+      quoteTime: loaded.quoteTime,
+      sourceLabel: loaded.sourceLabel,
+    });
+  }
+  if (market?.dailyOnly && (timeframe === "15m" || timeframe === "1h")) {
+    warnings.push("No intraday bars for this symbol. Showing the daily series instead of inventing them.");
+    timeframe = "1d";
+  }
 
   let chart;
   try {
@@ -96,16 +143,19 @@ function pack(
     sma200Daily: number | null;
     warnings: string[];
     quoteTime: number | null;
+    sourceLabel?: string;
   },
 ): OhlcResponse {
   const last = bars[bars.length - 1];
   const lastBarUnix = last?.time ?? null;
   const stale = Boolean(ctx.market?.hideStale && isStaleQuote(lastBarUnix));
   const now = Date.now();
-  const quoteTimeUnix = ctx.quoteTime;
+  const quoteStamp = ctx.quoteTime;
+  const metaFresh = quoteStamp != null && lastBarUnix != null && lastBarUnix - quoteStamp < 5 * 86_400;
+  const quoteTimeUnix = metaFresh ? quoteStamp : lastBarUnix ?? quoteStamp;
   const ageBasis = quoteTimeUnix ?? lastBarUnix;
   const continuous = Boolean(ctx.market?.continuous && ctx.market.continuous.toUpperCase() === ctx.ticker.toUpperCase());
-  let lastPrice: number | null = meta.regularMarketPrice ?? last?.close ?? null;
+  let lastPrice: number | null = (metaFresh ? meta.regularMarketPrice : null) ?? last?.close ?? null;
   let staleReason: string | null = null;
   if (stale) {
     lastPrice = null;
@@ -127,8 +177,12 @@ function pack(
     contractLabel: continuous ? null : ctx.market?.contractLabel ?? null,
     continuous,
     proxyNote: ctx.market?.proxyNote ?? null,
-    source: "Yahoo Finance",
-    delayNote: delayNoteFor(asset, Boolean(ctx.market?.fxClose22)),
+    infoNote: ctx.market?.infoNote ?? null,
+    exactness: ctx.market?.exactness ?? null,
+    licence: ctx.market?.licence ?? null,
+    attribution: ctx.market?.attribution ?? null,
+    source: ctx.sourceLabel ?? "Yahoo Finance",
+    delayNote: ctx.market?.delayNote ?? delayNoteFor(asset, Boolean(ctx.market?.fxClose22)),
     times: "Europe/London",
     fetchedAt: new Date(now).toISOString(),
     lastBarUnix,
@@ -150,7 +204,9 @@ function clamp(n: number, lo: number, hi: number): number {
 
 export function ohlcToCsv(payload: OhlcResponse): string {
   const lines: string[] = [];
-  lines.push(`# source,Yahoo Finance`);
+  lines.push(`# source,${payload.source}`);
+  if (payload.licence) lines.push(`# licence,${payload.licence.replaceAll(",", ";")}`);
+  if (payload.attribution) lines.push(`# attribution,${payload.attribution.replaceAll(",", ";")}`);
   lines.push(`# ticker,${payload.ticker}`);
   lines.push(`# timeframe,${payload.timeframe}`);
   lines.push(`# currency,${payload.currency ?? ""}`);

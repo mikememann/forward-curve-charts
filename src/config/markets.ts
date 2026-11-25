@@ -13,9 +13,35 @@
  * Prices are Yahoo's native units. Nothing is rescaled to IG points.
  */
 
-export const GROUPS = ["Energy", "FX", "Metals", "Softs/Grains", "Equities/Indices"] as const;
+export const GROUPS = [
+  "Energy",
+  "FX",
+  "Metals",
+  "Softs/Grains",
+  "Equities/Indices",
+  "LSEG · Main",
+  "LSEG · Cocoa",
+  "LSEG · CFTC",
+  "LSEG · Macro",
+  "LSEG · Bonds",
+  "LSEG · Shipping",
+  "LSEG · REGO",
+] as const;
 export type MarketGroup = (typeof GROUPS)[number];
-export type AssetClass = "future" | "fx" | "equity" | "index";
+export type AssetClass = "future" | "fx" | "equity" | "index" | "macro";
+export type SourceKind =
+  | "yahoo"
+  | "fred"
+  | "boe"
+  | "bundesbank"
+  | "cftc"
+  | "worldbank"
+  | "energycharts"
+  | "elexon"
+  | "portwatch"
+  | "agsi";
+export type Exactness = "exact" | "near-exact" | "proxy";
+export type NativeFrequency = "15m" | "30m" | "1h" | "1d" | "1w" | "1mo";
 
 export interface ContractSpec {
   /** Yahoo root, e.g. "BZ", "ZW", "CC". */
@@ -83,6 +109,38 @@ export interface Market {
   hideStale?: boolean;
   decimals?: number;
   curve?: CurveConfig;
+  /** Where the bars come from. Defaults to Yahoo. */
+  source?: SourceKind;
+  /** Adapter series id (FRED id, BoE code, CFTC code, World Bank column, …). */
+  seriesId?: string;
+  licence?: string;
+  attribution?: string;
+  exactness?: Exactness;
+  /** LSEG RIC, when this row comes from the Workspace layout. */
+  ric?: string;
+  /** Factual note that is not a proxy warning (month mapping, missing history). */
+  infoNote?: string;
+  /** Yahoo publishes no intraday bars. Finer timeframes fall back to daily with a warning. */
+  dailyOnly?: boolean;
+  /** Yahoo publishes no daily history. Daily and weekly requests are refused. */
+  intradayOnly?: boolean;
+  /** Also list this market under an LSEG panel, in addition to `group`. */
+  alsoIn?: MarketGroup;
+  /** Observation step of the source. */
+  nativeFrequency?: NativeFrequency;
+  /** Server env var required before this series is fetched. Off when unset. */
+  requiresEnv?: string;
+  delayNote?: string;
+}
+
+export interface UnavailableSeries {
+  id: string;
+  name: string;
+  group: MarketGroup;
+  ric?: string;
+  /** Shown on the row and in the panel. No series is fetched. */
+  reason: string;
+  licence?: string;
 }
 
 const ALL_MONTHS = "FGHJKMNQUVXZ";
@@ -99,8 +157,15 @@ export const markets: Market[] = [
     continuous: "BZ=F",
     curve: {
       count: 18,
-      note: "ICE Brent via Yahoo tickers BZmyy.NYM (USD per barrel, not IG points). Months Yahoo does not return are gaps — the line is not filled in. A specific month can differ from BZ=F, which is back-adjusted.",
+      note: "NYMEX Brent Last Day Financial (BZ) via Yahoo, USD/bbl, not IG points. Yahoo's month code runs about one month ahead of ICE near expiry (ICE Jan-27 still trades into late November while Yahoo is already on Feb-27). Months Yahoo does not return are gaps. Not the same levels as back-adjusted BZ=F.",
     },
+    alsoIn: "LSEG · Main",
+    exactness: "near-exact",
+    ric: "LCOc1",
+    infoNote:
+      "Yahoo's BZ month runs about one month ahead of ICE near expiry. This is NYMEX Brent Last Day Financial, which cash-settles to ICE Brent, not the ICE screen month itself.",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
   },
   {
     id: "ttf",
@@ -114,8 +179,14 @@ export const markets: Market[] = [
     curve: {
       count: 16,
       spec: { root: "TTF", venue: "NYM", months: ALL_MONTHS, expiryMonthOffset: 0, expiryDay: 1 },
-      note: "Yahoo's free TTF month symbols are incomplete, and the ones that exist are labeled “Dutch TTF Natural Gas Calendar”, not a verified ICE Endex month settlement. Missing months are gaps. TTF=F is the chart series; if it has no fresh bar the price is n/a.",
+      note: "Partial curve. Yahoo only lists about the next 3–6 TTF months (further codes such as TTFQ27 return nothing), and the names say “Dutch TTF Natural Gas Calendar”, not a verified ICE Endex settlement. Missing months are gaps. TTF=F is the chart series; a stale bar is shown as n/a.",
     },
+    alsoIn: "LSEG · Main",
+    exactness: "near-exact",
+    ric: "TRNLTTFMc1",
+    infoNote: "Near-exact CME stand-in for ICE Endex TTF. The free curve is only the first few months, not the full strip.",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
   },
   {
     id: "gbpusd",
@@ -126,6 +197,11 @@ export const markets: Market[] = [
     decimals: 4,
     ticker: "GBPUSD=X",
     fxClose22: true,
+    alsoIn: "LSEG · Macro",
+    exactness: "exact",
+    ric: "GBP=",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
     proxyNote:
       "Spot proxy for IG's GBP/USD Dec-26 forward. This is GBPUSD=X (spot), not the forward, and it is not scaled to IG's ×10,000 quote.",
   },
@@ -138,6 +214,11 @@ export const markets: Market[] = [
     decimals: 4,
     ticker: "GBPEUR=X",
     fxClose22: true,
+    alsoIn: "LSEG · Macro",
+    exactness: "exact",
+    ric: "GBPEUR=",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
   },
   {
     id: "gbpzar",
@@ -148,6 +229,11 @@ export const markets: Market[] = [
     decimals: 4,
     ticker: "GBPZAR=X",
     fxClose22: true,
+    alsoIn: "LSEG · Bonds",
+    exactness: "exact",
+    ric: "GBPZAR=",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
   },
   {
     id: "gold",
@@ -159,8 +245,13 @@ export const markets: Market[] = [
     preferContinuous: true,
     continuous: "GC=F",
     contract: { root: "GC", venue: "CMX", months: ALL_MONTHS, expiryMonthOffset: 0, expiryDay: 20 },
+    alsoIn: "LSEG · Main",
+    exactness: "proxy",
+    ric: "XAU=",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
     proxyNote:
-      "COMEX gold futures as a proxy for spot gold. The default series GC=F is Yahoo's continuous contract; it is back-adjusted and is not a spot fix or a single delivery month. Switch to the specific contract for a month's actual price.",
+      "COMEX gold futures as a proxy for spot gold. The default series GC=F is Yahoo's continuous contract; it is back-adjusted and is not a spot fix or a single delivery month. XAUUSD=X is not on Yahoo. Switch to the specific contract for a month's actual price.",
     curve: {
       count: 16,
       note: "COMEX gold (GC) via Yahoo. Serial months often have no daily settlement on Yahoo; those points are gaps, not interpolated. Not a spot gold curve.",
@@ -191,6 +282,11 @@ export const markets: Market[] = [
     decimals: 2,
     contract: { root: "ZW", venue: "CBT", months: "HKNUZ", expiryMonthOffset: 0, expiryDay: 14 },
     continuous: "ZW=F",
+    alsoIn: "LSEG · Main",
+    exactness: "exact",
+    ric: "Wc1",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
     curve: {
       count: 10,
       note: "CBOT wheat (ZW) in US cents per bushel. Listed months are Mar, May, Jul, Sep, Dec. Not IG points.",
@@ -221,6 +317,11 @@ export const markets: Market[] = [
     decimals: 2,
     contract: { root: "ZC", venue: "CBT", months: "HKNUZ", expiryMonthOffset: 0, expiryDay: 14, minDaysToExpiry: 25 },
     continuous: "ZC=F",
+    alsoIn: "LSEG · Main",
+    exactness: "exact",
+    ric: "Cc1",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
     curve: {
       count: 10,
       note: "CBOT corn (ZC) in US cents per bushel. The chart defaults to the next liquid month (December is skipped once it is inside 25 days of expiry). The curve still includes December when Yahoo quotes it.",
@@ -234,6 +335,11 @@ export const markets: Market[] = [
     assetClass: "index",
     decimals: 2,
     ticker: "^FTSE",
+    alsoIn: "LSEG · Macro",
+    exactness: "exact",
+    ric: ".FTSE",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
   },
   {
     id: "nvda",
@@ -253,6 +359,11 @@ export const markets: Market[] = [
     decimals: 2,
     ticker: "BP.L",
     pence: true,
+    alsoIn: "LSEG · Cocoa",
+    exactness: "exact",
+    ric: "BP.L",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
   },
   {
     id: "tesco",
@@ -263,6 +374,11 @@ export const markets: Market[] = [
     decimals: 2,
     ticker: "TSCO.L",
     pence: true,
+    alsoIn: "LSEG · Cocoa",
+    exactness: "exact",
+    ric: "TSCO.L",
+    licence: "Yahoo terms: free to view, personal use, no redistribution",
+    attribution: "Yahoo Finance",
   },
   {
     id: "vrtx",
@@ -290,15 +406,6 @@ export interface ExtraCurve {
 }
 
 export const extraCurves: ExtraCurve[] = [
-  {
-    id: "wti",
-    name: "WTI",
-    units: "USD/bbl",
-    decimals: 2,
-    count: 18,
-    spec: { root: "CL", venue: "NYM", months: ALL_MONTHS, expiryMonthOffset: 0, expiryDay: 20 },
-    note: "NYMEX WTI (CL), USD per barrel. Reference curve only — not on the IG watchlist. Months Yahoo skips are gaps.",
-  },
   {
     id: "hh",
     name: "Henry Hub",

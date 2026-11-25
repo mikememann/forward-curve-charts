@@ -19,7 +19,7 @@ npm start         # serve the production build
 
 ## Deploy to Vercel
 
-The app is a Next.js App Router project. No environment variables.
+The app is a Next.js App Router project. The only optional variable is `AGSI_API_KEY` (a free GIE key). Leave it unset and EU gas storage stays off.
 
 1. Import this repository in Vercel. Framework preset: **Next.js**. Root directory: the repo root.
 2. Deploy. `src/app/api/*` runs as Node serverless functions (`maxDuration` 60 on the data routes).
@@ -78,6 +78,44 @@ The sidebar search adds a Yahoo symbol for this browser only (`localStorage`). I
 | Failures | A failed fetch is an error state. No number is invented to fill a gap. Forward-curve months Yahoo does not quote are gaps; the line is not bridged. |
 | Delay | Every chart shows **Yahoo Finance**, the delay note (futures are typically 10–30 minutes), the last bar in UK time, and the age of the quote timestamp. |
 | Units | Yahoo’s native units. Not IG points. |
+
+## LSEG Workspace layout
+
+The sidebar’s **LSEG ·** groups are the markets from Mike’s old Workspace layout that have a verified free feed, exact or a labelled stand-in. The same market can sit in an IG group and an LSEG group (one quote, two rows). Configuration is `src/config/lseg.ts`, still driven by the market list: each row names its source, series id, licence, and whether it is exact, near-exact, or a proxy.
+
+Rows that are view-only, proprietary, or unclear are listed in the same groups as **unavailable**, with the reason. Nothing is invented for them. Euronext wheat is one of those: Yahoo’s `EBM=F` is Micro Bitcoin Euro, not wheat, and it is not used.
+
+| Source | What it feeds | Licence |
+|---|---|---|
+| Yahoo Finance | Futures, FX, equities, GSCI, NBP, palm oil, CBOT urea | Free to view, personal use, no redistribution |
+| FRED | EIA Brent spot, IMF monthly oils, policy rates, US yields, PPI | Public domain |
+| Bank of England IADB | Bank Rate, 5y and 10y gilt par yields | Free reuse with attribution |
+| Deutsche Bundesbank BBSIS | German 1y / 5y / 10y curve yields | Free reuse with attribution |
+| CFTC public reporting | Managed-money net for sugar, soybeans, cocoa, corn, SRW wheat | Public domain |
+| World Bank Pink Sheet | Coconut oil, urea, DAP. The monthly xlsx link is scraped from the commodity-markets page because the URL changes | CC BY 4.0 |
+| Energy-Charts | German day-ahead power | CC BY 4.0 |
+| Elexon | UK APX half-hourly market index, last eight weeks stitched together | Free reuse with attribution |
+| IMF PortWatch | Daily ship transits through the Strait of Hormuz | Free with attribution |
+| GIE AGSI+ | EU gas storage percent full | Free with attribution, **off unless `AGSI_API_KEY` is set** |
+
+Watch-outs that are labelled on the chart, not papered over:
+
+- Yahoo Brent months run about one month ahead of ICE near expiry.
+- The TTF forward curve is partial: Yahoo only lists about 3–6 months.
+- `NBP=F` has no contract name. The level is about 30 **USD/MMBtu**, not pence per therm.
+- `CPO=F` is the CME USD calendar future, not Bursa Malaysia in MYR/t, and it has no intraday bars. `UFV=F` is CBOT urea with no contract name; it is not the World Bank USD/t urea series.
+- `^SPGSAG` and `^SPGSEN` have no daily history. Daily and weekly charts are refused.
+- Stooq is not used.
+
+### Custom spreads
+
+A formula of two or more market ids, with spaces around the operators: `brent - wti`, `us-10y - us-1y`, `( brent - wti ) / brent`. Saved in this browser. `S)WHprem` and `S)GasSpread` stay unavailable until the formula is added there. The API is the same OHLC route:
+
+```bash
+curl "http://localhost:3000/api/ohlc?formula=brent%20-%20wti&timeframe=1d"
+```
+
+Points exist only where every leg has a bar. Division by zero is dropped.
 
 ## API
 

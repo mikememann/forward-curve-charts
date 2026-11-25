@@ -1,5 +1,6 @@
 "use client";
 
+import { unavailableSeries } from "@/config/lseg";
 import { autoFibDrawing, autoForkDrawing } from "@/components/autoDraw";
 import { CurveView } from "@/components/CurveView";
 import type { CompareSeries } from "@/components/PriceChart";
@@ -36,6 +37,7 @@ export function ChartWorkspace() {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [custom, setCustom] = useState<CustomSymbol[]>([]);
+  const [spreads, setSpreads] = useState<{ id: string; name: string; formula: string }[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [payload, setPayload] = useState<OhlcResponse | null>(null);
   const [chartError, setChartError] = useState<string | null>(null);
@@ -60,6 +62,7 @@ export function ChartWorkspace() {
     const url = new URLSearchParams(window.location.search);
     const tf = url.get("tf");
     setCustom(savedCustom);
+    setSpreads(readJson<{ id: string; name: string; formula: string }[]>("mm-charts:spreads:v1") ?? []);
     const id = url.get("m") || prefs?.marketId || "brent";
     setMarketId(id);
     const picked = presentMarkets().find((m) => m.id === id);
@@ -81,12 +84,13 @@ export function ChartWorkspace() {
     if (!hydrated) return;
     localStorage.setItem("mm-charts:prefs:v1", JSON.stringify({ marketId, timeframe, chartType, logScale, show }));
     localStorage.setItem("mm-charts:custom:v1", JSON.stringify(custom));
+    localStorage.setItem("mm-charts:spreads:v1", JSON.stringify(spreads));
     const p = new URLSearchParams();
     p.set("m", marketId);
     p.set("tf", timeframe);
     if (view === "curve") p.set("view", "curve");
     window.history.replaceState(null, "", `?${p}`);
-  }, [hydrated, marketId, timeframe, chartType, logScale, show, custom, view]);
+  }, [hydrated, marketId, timeframe, chartType, logScale, show, custom, spreads, view]);
 
   const viewModel = useMemo(() => {
     return listed.find((m) => m.id === marketId) ?? customView(custom.find((c) => `custom:${c.ticker}` === marketId));
@@ -139,12 +143,16 @@ export function ChartWorkspace() {
   }, [hydrated, custom]);
 
   useEffect(() => {
-    if (!hydrated || !ticker) return;
+    if (!hydrated) return;
+    const spreadNow = spreads.find((s) => s.id === marketId);
+    if (!spreadNow && !ticker) return;
     let live = true;
     const ctrl = new AbortController();
     setChartLoading(true);
     setChartError(null);
-    const q = new URLSearchParams({ ticker, timeframe, market: viewModel?.id.startsWith("custom:") ? "" : viewModel?.id ?? "" });
+    const q = spreadNow
+      ? new URLSearchParams({ formula: spreadNow.formula, timeframe })
+      : new URLSearchParams({ ticker, timeframe, market: viewModel?.id.startsWith("custom:") ? "" : viewModel?.id ?? "" });
     fetch(`/api/ohlc?${q}`, { signal: ctrl.signal })
       .then(async (res) => {
         const body = (await res.json()) as OhlcResponse;
@@ -165,7 +173,7 @@ export function ChartWorkspace() {
       live = false;
       ctrl.abort();
     };
-  }, [hydrated, ticker, timeframe, viewModel?.id, retry]);
+  }, [hydrated, ticker, timeframe, viewModel?.id, retry, marketId, spreads]);
 
   useEffect(() => {
     if (!hydrated || view !== "curve") return;
@@ -239,13 +247,19 @@ export function ChartWorkspace() {
     setMarketId(id);
     setNavOpen(false);
     const m = listed.find((x) => x.id === id);
-    if (view === "curve" && m && !m.curveId) setView("chart");
+    if (m?.intradayOnly && (timeframe === "1d" || timeframe === "1w")) setTimeframe("1h");
+    if (view === "curve" && (!m || !m.curveId)) setView("chart");
   }
+
+  const spread = spreads.find((s) => s.id === marketId) ?? null;
+  const unavailable = unavailableSeries.find((u) => u.id === marketId) ?? null;
 
   const quote = viewModel ? quotes[viewModel.id] : undefined;
   const bar = hover ?? payload?.bars[payload.bars.length - 1] ?? null;
   const decimals = quote?.decimals ?? (payload?.pence ? 2 : 2);
-  const headerPrice = quote?.stale || payload?.stale ? null : quote?.last ?? payload?.lastPrice ?? null;
+  const shownTicker = spread?.formula || ticker;
+  const showingThis = !unavailable && payload != null && payload.ticker === shownTicker;
+  const headerPrice = unavailable ? null : quote?.stale || payload?.stale ? null : quote?.last ?? (showingThis ? payload?.lastPrice ?? null : null);
   const trade = drawings.find((d): d is TradeDrawing => d.type === "trade");
 
   return (
@@ -268,6 +282,19 @@ export function ChartWorkspace() {
             setCustom((prev) => prev.filter((p) => p.ticker !== sym));
             if (marketId === `custom:${sym}`) setMarketId("brent");
           }}
+          unavailable={unavailableSeries}
+          spreads={spreads}
+          onAddSpread={(s) => {
+            const id = `spread-${Math.random().toString(36).slice(2, 8)}`;
+            setSpreads((prev) => [...prev, { id, name: s.name, formula: s.formula }]);
+            setMarketId(id);
+            setView("chart");
+            setNavOpen(false);
+          }}
+          onRemoveSpread={(id) => {
+            setSpreads((prev) => prev.filter((s) => s.id !== id));
+            if (marketId === id) setMarketId("brent");
+          }}
         />
       </div>
       {navOpen && <button className="backdrop" aria-label="Close markets" onClick={() => setNavOpen(false)} />}
@@ -276,7 +303,7 @@ export function ChartWorkspace() {
           <button className="nav-btn" onClick={() => setNavOpen(true)} type="button">Markets</button>
           <div className="title-block">
             <h1>
-              {viewModel?.name ?? "Chart"}
+              {unavailable?.name ?? spread?.name ?? viewModel?.name ?? "Chart"}
               {seriesMode === "contract" && viewModel?.contractLabel ? <span> · {viewModel.contractLabel}</span> : null}
               {seriesMode === "continuous" ? <span> · continuous</span> : null}
             </h1>
@@ -398,7 +425,17 @@ export function ChartWorkspace() {
         {view === "chart" && (
           <>
             <div className="banners">
+              {viewModel?.exactness && (
+                <p className="source-line">
+                  {viewModel.exactness}
+                  {viewModel.ric ? ` · ${viewModel.ric}` : ""}
+                  {viewModel.licence ? ` · ${viewModel.licence}` : ""}
+                  {viewModel.attribution ? ` · ${viewModel.attribution}` : ""}
+                </p>
+              )}
+              {viewModel?.infoNote && <p className="banner">{viewModel.infoNote}</p>}
               {viewModel?.proxyNote && <p className="banner warn"><b>Proxy.</b> {viewModel.proxyNote}</p>}
+              {spread && payload?.infoNote && <p className="banner">{payload.infoNote}</p>}
               {seriesMode === "continuous" && <p className="banner warn"><b>Back-adjusted continuous {ticker}.</b> Yahoo splices the rolls, so levels and percentage changes will not match the specific contract.</p>}
               {viewModel?.pence && <p className="banner">Quoted in pence (p), not pounds.</p>}
               {(quote?.stale || payload?.stale) && <p className="banner warn"><b>No fresh quote.</b> {payload?.staleReason || `Last updated ${quote?.lastUpdatedLabel}. The last figure is not a current price.`}</p>}
@@ -412,7 +449,7 @@ export function ChartWorkspace() {
               )}
               {status && <p className="source-line hint">{status}</p>}
             </div>
-            {bar && (
+            {showingThis && bar && (
               <div className="legend-strip">
                 <span>O {fmt(bar.open, decimals)}</span>
                 <span>H {fmt(bar.high, decimals)}</span>
@@ -431,15 +468,23 @@ export function ChartWorkspace() {
             )}
             <div className="stage">
               <div className="chart-stage">
-                {chartError && (
+                {unavailable && (
                   <div className="error-state">
-                    <h2>Couldn't load {ticker}</h2>
+                    <h2>{unavailable.name} is not charted</h2>
+                    {unavailable.ric && <p className="mono">{unavailable.ric}</p>}
+                    <p>{unavailable.reason}</p>
+                    {unavailable.licence && <p>{unavailable.licence}</p>}
+                  </div>
+                )}
+                {!unavailable && chartError && (
+                  <div className="error-state">
+                    <h2>Couldn't load {spread?.formula || ticker}</h2>
                     <p>{chartError}</p>
                     <p>No price has been substituted.</p>
                     <button type="button" onClick={() => setRetry((n) => n + 1)}>Retry</button>
                   </div>
                 )}
-                {!chartError && payload && payload.ticker === ticker && (
+                {showingThis && !chartError && (
                   <Chart
                     payload={payload}
                     chartType={chartType}
@@ -631,6 +676,19 @@ function customView(c: CustomSymbol | undefined): MarketView | null {
     hideStale: false,
     decimals: 2,
     curveId: null,
+    alsoIn: null,
+    sourceKind: "yahoo",
+    seriesId: null,
+    licence: null,
+    attribution: null,
+    exactness: null,
+    ric: null,
+    infoNote: null,
+    dailyOnly: false,
+    intradayOnly: false,
+    nativeFrequency: null,
+    requiresEnv: null,
+    delayNote: null,
   };
 }
 

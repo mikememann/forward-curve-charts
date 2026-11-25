@@ -136,9 +136,10 @@ export function PriceChart(props: Props) {
 
     const intraday = props.payload.timeframe === "15m" || props.payload.timeframe === "1h";
     chart.timeScale().applyOptions({ timeVisible: intraday, secondsVisible: false });
+    const nonPositive = bars.some((b) => b.low <= 0 || b.close <= 0);
     chart.priceScale("right").applyOptions({
       borderColor: "#2a2f3a",
-      mode: props.logScale ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
+      mode: props.logScale && !nonPositive ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal,
     });
 
     const decimals = props.payload.pence ? 2 : guessDecimals(props.payload);

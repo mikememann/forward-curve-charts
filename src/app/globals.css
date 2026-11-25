@@ -40,9 +40,18 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .wl-age { grid-area: age; }
 .wl-chg.up, .up { color: var(--up); }
 .wl-chg.down, .down { color: var(--down); }
-.proxy, .stale { font-style: normal; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; border-radius: 3px; padding: 1px 4px; }
-.proxy { color: #ffcc80; background: #3a2e12; }
+.proxy, .stale, .flag { font-style: normal; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; border-radius: 3px; padding: 1px 4px; }
+.proxy, .flag.proxy { color: #ffcc80; background: #3a2e12; }
+.flag.exact { color: #b2dfdb; background: #14332f; }
+.flag.near { color: #bbdefb; background: #1a2a3a; }
 .stale { color: #ffab91; background: #3a221c; }
+.wl-row.unavailable { opacity: 0.72; }
+.wl-row.unavailable .wl-age { display: block; white-space: normal; }
+.spread-box { border-top: 1px solid var(--line); padding: 8px 10px 4px; }
+.spread-box h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.spread-help { margin: 0 0 6px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.spread-box form { display: grid; gap: 4px; margin: 6px 0; }
+.spread-box input { background: #0e1117; border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
 .wl-x { grid-column: 1 / -1; color: var(--muted); font-size: 11px; text-align: left; padding: 0; }
 .search { border-top: 1px solid var(--line); padding: 10px; position: relative; }
 .search label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }

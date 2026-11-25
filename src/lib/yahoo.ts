@@ -1,4 +1,5 @@
 import "server-only";
+import { DataError } from "@/lib/errors";
 import type { Bar } from "@/lib/types";
 
 export interface YahooMeta {
@@ -18,12 +19,9 @@ export interface YahooChart {
   bars: Bar[];
 }
 
-export class YahooError extends Error {
-  constructor(
-    message: string,
-    readonly symbol: string,
-  ) {
-    super(message);
+export class YahooError extends DataError {
+  constructor(message: string, symbol: string) {
+    super(message, symbol);
     this.name = "YahooError";
   }
 }
@@ -34,6 +32,7 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
+const inflight = new Map<string, Promise<YahooChart>>();
 
 function ttlFor(interval: string): number {
   if (interval === "1d" || interval === "1wk" || interval === "1mo") return 5 * 60_000;
@@ -127,6 +126,14 @@ export async function yahooChart(symbol: string, interval: string, range: string
   const key = `${symbol}|${interval}|${range}`;
   const hit = cache.get(key);
   if (hit && hit.expires > Date.now()) return hit.value;
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const job = yahooChartUncached(symbol, interval, range, key).finally(() => inflight.delete(key));
+  inflight.set(key, job);
+  return job;
+}
+
+async function yahooChartUncached(symbol: string, interval: string, range: string, key: string): Promise<YahooChart> {
   let last: unknown;
   for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
     try {
