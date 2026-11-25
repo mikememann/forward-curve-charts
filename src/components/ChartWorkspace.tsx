@@ -6,73 +6,119 @@ import { CurveView } from "@/components/CurveView";
 import type { CompareSeries } from "@/components/PriceChart";
 import { DEFAULT_TOGGLES, TOOL_HINT, type ChartType, type IndicatorToggles, type SeriesMode, type Tool } from "@/components/uiTypes";
 import { Watchlist, type CustomSymbol } from "@/components/Watchlist";
+import { ChartPane, type PaneHandle, type PaneSnapshot } from "@/components/ChartPane";
 import { allCurves, presentMarkets, type MarketView } from "@/lib/marketModel";
+import { fetchCurve } from "@/lib/clientCache";
+import { decodeLayout, encodeLayout, setLayoutCount, singleLayout, type DeskLayout, type LayoutCount, type PaneSettings } from "@/lib/layout";
 import { newId, riskReward, type Drawing, type TradeDrawing } from "@/lib/drawings";
 import { formatChange, formatPct, formatPrice } from "@/lib/format";
 import { formatAge, formatLondon } from "@/lib/time";
 import type { CurveResponse, EnrichedBar, OhlcResponse, Quote, Timeframe } from "@/lib/types";
-import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
-
-const Chart = dynamic(() => import("@/components/PriceChart").then((m) => m.PriceChart), {
-  ssr: false,
-  loading: () => <div className="chart-skeleton">Loading chart…</div>,
-});
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const COMPARE_COLORS = ["#ff8a65", "#4fc3f7", "#ce93d8"];
 const TFS: Timeframe[] = ["15m", "1h", "1d", "1w"];
 
+type Prefs = {
+  marketId?: string;
+  timeframe?: Timeframe;
+  chartType?: ChartType;
+  logScale?: boolean;
+  show?: Partial<IndicatorToggles>;
+};
+
 export function ChartWorkspace() {
   const curves = useMemo(() => allCurves(), []);
   const [hydrated, setHydrated] = useState(false);
-  const [marketId, setMarketId] = useState("brent");
-  const [timeframe, setTimeframe] = useState<Timeframe>("1h");
-  const [chartType, setChartType] = useState<ChartType>("candle");
-  const [logScale, setLogScale] = useState(false);
-  const [show, setShow] = useState<IndicatorToggles>(DEFAULT_TOGGLES);
-  const [seriesMode, setSeriesMode] = useState<SeriesMode>("contract");
-  const [view, setView] = useState<"chart" | "curve">("chart");
-  const [curveId, setCurveId] = useState("brent");
+  const [desk, setDesk] = useState<DeskLayout>(() => singleLayout());
+  const [narrow, setNarrow] = useState(false);
+  const [snap, setSnap] = useState<PaneSnapshot | null>(null);
+  const paneRefs = useRef<(PaneHandle | null)[]>([]);
+  const activeRef = useRef(0);
   const [tool, setTool] = useState<Tool>("cursor");
-  const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [custom, setCustom] = useState<CustomSymbol[]>([]);
   const [spreads, setSpreads] = useState<{ id: string; name: string; formula: string }[]>([]);
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
-  const [payload, setPayload] = useState<OhlcResponse | null>(null);
-  const [chartError, setChartError] = useState<string | null>(null);
-  const [chartLoading, setChartLoading] = useState(false);
-  const [curve, setCurve] = useState<CurveResponse | null>(null);
-  const [curveError, setCurveError] = useState<string | null>(null);
-  const [curveLoading, setCurveLoading] = useState(false);
   const [compareIds, setCompareIds] = useState<string[]>([]);
   const [compare, setCompare] = useState<CompareSeries[]>([]);
-  const [hover, setHover] = useState<EnrichedBar | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [rangeSync, setRangeSync] = useState<{ from: number; to: number; source: number } | null>(null);
+  const [timeSync, setTimeSync] = useState<{ time: number | null; source: number } | null>(null);
   const [menu, setMenu] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [armClear, setArmClear] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [retry, setRetry] = useState(0);
   const listed = useMemo(() => (hydrated ? presentMarkets() : []), [hydrated]);
+  const layoutShown: LayoutCount = narrow ? 1 : desk.layout;
+  const active = Math.min(desk.active, Math.max(0, desk.panes.length - 1));
+  activeRef.current = active;
+  const pane = desk.panes[active] ?? desk.panes[0];
+  const marketId = pane.marketId;
+  const timeframe = pane.timeframe;
+  const chartType = pane.chartType;
+  const logScale = pane.logScale;
+  const show = pane.show;
+  const seriesMode = pane.seriesMode;
+  const view = pane.view;
+
+  const updateActive = useCallback((patch: Partial<PaneSettings> | ((p: PaneSettings) => Partial<PaneSettings>), linkMarket = false) => {
+    setDesk((d) => {
+      const index = Math.min(d.active, d.panes.length - 1);
+      return {
+        ...d,
+        panes: d.panes.map((p, i) => {
+          const hit = i === index || (linkMarket && d.linkSymbol && i < d.layout);
+          if (!hit) return p;
+          const extra = typeof patch === "function" ? patch(p) : patch;
+          if (linkMarket && i !== index) {
+            return {
+              ...p,
+              marketId: extra.marketId ?? p.marketId,
+              seriesMode: extra.seriesMode ?? p.seriesMode,
+            };
+          }
+          return { ...p, ...extra, show: extra.show ? { ...extra.show } : p.show };
+        }),
+      };
+    });
+  }, []);
+
+  const setTimeframe = (tf: Timeframe) => updateActive({ timeframe: tf });
+  const setChartType = (t: ChartType) => updateActive({ chartType: t });
+  const setLogScale = (next: boolean | ((v: boolean) => boolean)) => updateActive((p) => ({ logScale: typeof next === "function" ? next(p.logScale) : next }));
+  const setShow = (next: IndicatorToggles | ((s: IndicatorToggles) => IndicatorToggles)) => updateActive((p) => ({ show: typeof next === "function" ? next(p.show) : next }));
+  const setSeriesMode = (mode: SeriesMode) => updateActive({ seriesMode: mode });
+  const setView = (next: "chart" | "curve") => updateActive({ view: next });
 
   useEffect(() => {
-    const prefs = readJson<{ marketId?: string; timeframe?: Timeframe; chartType?: ChartType; logScale?: boolean; show?: IndicatorToggles }>("mm-charts:prefs:v1");
+    const prefs = readJson<Prefs>("mm-charts:prefs:v1");
+    const savedLayout = readJson<DeskLayout>("mm-charts:layout:v1");
     const savedCustom = readJson<CustomSymbol[]>("mm-charts:custom:v1") ?? [];
-    const url = new URLSearchParams(window.location.search);
-    const tf = url.get("tf");
     setCustom(savedCustom);
     setSpreads(readJson<{ id: string; name: string; formula: string }[]>("mm-charts:spreads:v1") ?? []);
-    const id = url.get("m") || prefs?.marketId || "brent";
-    setMarketId(id);
-    const picked = presentMarkets().find((m) => m.id === id);
-    setSeriesMode(picked?.preferContinuous ? "continuous" : "contract");
-    setTimeframe(tf === "15m" || tf === "1h" || tf === "1d" || tf === "1w" ? tf : prefs?.timeframe || "1h");
-    if (prefs?.chartType) setChartType(prefs.chartType);
-    if (prefs?.logScale) setLogScale(true);
-    if (prefs?.show) setShow({ ...DEFAULT_TOGGLES, ...prefs.show });
-    if (url.get("view") === "curve") setView("curve");
+    const fromUrl = decodeLayout(window.location.search);
+    if (fromUrl) setDesk(fromUrl);
+    else if (savedLayout && savedLayout.panes?.length && savedLayout.panes.every((p) => p && p.marketId && p.show)) setDesk(savedLayout);
+    else {
+      const url = new URLSearchParams(window.location.search);
+      const tf = url.get("tf");
+      const id = url.get("m") || prefs?.marketId || "brent";
+      const base = singleLayout(id, tf === "15m" || tf === "1h" || tf === "1d" || tf === "1w" ? tf : prefs?.timeframe || "1h");
+      if (prefs?.chartType) base.panes[0].chartType = prefs.chartType;
+      if (prefs?.logScale) base.panes[0].logScale = true;
+      if (prefs?.show) base.panes[0].show = { ...DEFAULT_TOGGLES, ...prefs.show };
+      if (url.get("view") === "curve") base.panes[0].view = "curve";
+      const picked = presentMarkets().find((m) => m.id === id);
+      if (picked?.preferContinuous) base.panes[0].seriesMode = "continuous";
+      setDesk(base);
+    }
     setHydrated(true);
+    const mq = window.matchMedia("(max-width: 900px)");
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
   }, []);
 
   useEffect(() => {
@@ -82,41 +128,47 @@ export function ChartWorkspace() {
 
   useEffect(() => {
     if (!hydrated) return;
+    localStorage.setItem("mm-charts:layout:v1", JSON.stringify(desk));
     localStorage.setItem("mm-charts:prefs:v1", JSON.stringify({ marketId, timeframe, chartType, logScale, show }));
     localStorage.setItem("mm-charts:custom:v1", JSON.stringify(custom));
     localStorage.setItem("mm-charts:spreads:v1", JSON.stringify(spreads));
-    const p = new URLSearchParams();
-    p.set("m", marketId);
-    p.set("tf", timeframe);
-    if (view === "curve") p.set("view", "curve");
-    window.history.replaceState(null, "", `?${p}`);
-  }, [hydrated, marketId, timeframe, chartType, logScale, show, custom, spreads, view]);
+    window.history.replaceState(null, "", `?${encodeLayout(desk)}`);
+  }, [hydrated, desk, marketId, timeframe, chartType, logScale, show, custom, spreads]);
 
   const viewModel = useMemo(() => {
     return listed.find((m) => m.id === marketId) ?? customView(custom.find((c) => `custom:${c.ticker}` === marketId));
   }, [listed, marketId, custom]);
 
-  useEffect(() => {
-    if (!viewModel) return;
-    setSeriesMode(viewModel.preferContinuous ? "continuous" : "contract");
-    if (viewModel.curveId) setCurveId(viewModel.curveId);
-  }, [viewModel?.id]);
-
+  const [curvePick, setCurvePick] = useState<string | null>(null);
+  const [bigCurve, setBigCurve] = useState<CurveResponse | null>(null);
+  const [bigCurveError, setBigCurveError] = useState<string | null>(null);
+  const curveId = curvePick ?? viewModel?.curveId ?? "brent";
   const ticker = viewModel ? (seriesMode === "continuous" && viewModel.continuous ? viewModel.continuous : viewModel.contractTicker ?? viewModel.ticker) : "";
+  const payload = snap?.payload ?? null;
+  const chartError = snap?.error ?? null;
+  const hover = snap?.hover ?? null;
+  const drawings = snap?.drawings ?? [];
+  const curveLoading = view === "curve" && layoutShown === 1 && !bigCurve && !bigCurveError;
 
-  const changeDrawings = useCallback(
-    (next: Drawing[]) => {
-      setDrawings(next);
-      if (ticker) localStorage.setItem(`mm-charts:drawings:v1:${ticker}`, JSON.stringify(next));
-    },
-    [ticker],
-  );
+  const changeDrawings = useCallback((next: Drawing[]) => {
+    paneRefs.current[activeRef.current]?.setDrawings(next);
+  }, []);
 
   useEffect(() => {
-    if (!ticker) return;
-    setSelectedId(null);
-    setDrawings(readJson<Drawing[]>(`mm-charts:drawings:v1:${ticker}`) ?? []);
-  }, [ticker]);
+    if (!hydrated || view !== "curve" || layoutShown !== 1) return;
+    let live = true;
+    setBigCurveError(null);
+    fetchCurve(curveId)
+      .then((body) => {
+        if (live) setBigCurve(body);
+      })
+      .catch((e: Error) => {
+        if (live) setBigCurveError(e.message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [hydrated, view, layoutShown, curveId]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -141,66 +193,6 @@ export function ChartWorkspace() {
       clearInterval(t);
     };
   }, [hydrated, custom]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    const spreadNow = spreads.find((s) => s.id === marketId);
-    if (!spreadNow && !ticker) return;
-    let live = true;
-    const ctrl = new AbortController();
-    setChartLoading(true);
-    setChartError(null);
-    const q = spreadNow
-      ? new URLSearchParams({ formula: spreadNow.formula, timeframe })
-      : new URLSearchParams({ ticker, timeframe, market: viewModel?.id.startsWith("custom:") ? "" : viewModel?.id ?? "" });
-    fetch(`/api/ohlc?${q}`, { signal: ctrl.signal })
-      .then(async (res) => {
-        const body = (await res.json()) as OhlcResponse;
-        if (!res.ok) throw new Error(body.error || "Couldn't load this symbol");
-        if (!live) return;
-        setPayload(body);
-        setHover(null);
-      })
-      .catch((e: Error) => {
-        if (!live || e.name === "AbortError") return;
-        setPayload(null);
-        setChartError(e.message);
-      })
-      .finally(() => {
-        if (live) setChartLoading(false);
-      });
-    return () => {
-      live = false;
-      ctrl.abort();
-    };
-  }, [hydrated, ticker, timeframe, viewModel?.id, retry, marketId, spreads]);
-
-  useEffect(() => {
-    if (!hydrated || view !== "curve") return;
-    let live = true;
-    const ctrl = new AbortController();
-    setCurveLoading(true);
-    setCurveError(null);
-    fetch(`/api/curve?market=${encodeURIComponent(curveId)}`, { signal: ctrl.signal })
-      .then(async (res) => {
-        const body = (await res.json()) as CurveResponse;
-        if (!res.ok) throw new Error(body.error || "Couldn't load the curve");
-        if (!live) return;
-        setCurve(body);
-      })
-      .catch((e: Error) => {
-        if (!live || e.name === "AbortError") return;
-        setCurve(null);
-        setCurveError(e.message);
-      })
-      .finally(() => {
-        if (live) setCurveLoading(false);
-      });
-    return () => {
-      live = false;
-      ctrl.abort();
-    };
-  }, [hydrated, view, curveId]);
 
   useEffect(() => {
     if (!hydrated || !compareIds.length) {
@@ -244,11 +236,15 @@ export function ChartWorkspace() {
   }, [selectedId, drawings, changeDrawings]);
 
   function selectMarket(id: string) {
-    setMarketId(id);
     setNavOpen(false);
     const m = listed.find((x) => x.id === id);
-    if (m?.intradayOnly && (timeframe === "1d" || timeframe === "1w")) setTimeframe("1h");
-    if (view === "curve" && (!m || !m.curveId)) setView("chart");
+    setCurvePick(null);
+    updateActive((p) => ({
+      marketId: id,
+      seriesMode: m?.preferContinuous ? "continuous" : "contract",
+      timeframe: m?.intradayOnly && (p.timeframe === "1d" || p.timeframe === "1w") ? "1h" : p.timeframe,
+      view: p.view === "curve" && m && !m.curveId ? "chart" : p.view,
+    }), true);
   }
 
   const spread = spreads.find((s) => s.id === marketId) ?? null;
@@ -274,26 +270,26 @@ export function ChartWorkspace() {
           onSelect={selectMarket}
           onAdd={(sym) => {
             setCustom((prev) => (prev.some((p) => p.ticker === sym.ticker) ? prev : [...prev, sym]));
-            setMarketId(`custom:${sym.ticker}`);
+            selectMarket(`custom:${sym.ticker}`);
             setView("chart");
             setNavOpen(false);
           }}
           onRemove={(sym) => {
             setCustom((prev) => prev.filter((p) => p.ticker !== sym));
-            if (marketId === `custom:${sym}`) setMarketId("brent");
+            if (marketId === `custom:${sym}`) selectMarket("brent");
           }}
           unavailable={unavailableSeries}
           spreads={spreads}
           onAddSpread={(s) => {
             const id = `spread-${Math.random().toString(36).slice(2, 8)}`;
             setSpreads((prev) => [...prev, { id, name: s.name, formula: s.formula }]);
-            setMarketId(id);
+            selectMarket(id);
             setView("chart");
             setNavOpen(false);
           }}
           onRemoveSpread={(id) => {
             setSpreads((prev) => prev.filter((s) => s.id !== id));
-            if (marketId === id) setMarketId("brent");
+            if (marketId === id) selectMarket("brent");
           }}
         />
       </div>
@@ -416,15 +412,23 @@ export function ChartWorkspace() {
               {listed.find((m) => m.id === id)?.name ?? id} ×
             </button>
           ))}
+          <div className="seg" aria-label="Layout">
+            {([1, 2, 4, 6] as LayoutCount[]).map((n) => (
+              <button key={n} className={desk.layout === n ? "on" : ""} type="button" title={n === 1 ? "One chart" : `${n} charts`} onClick={() => setDesk((d) => setLayoutCount(d, n))}>{n}</button>
+            ))}
+          </div>
+          <button className={`toggle ${desk.syncCrosshair ? "on" : ""}`} type="button" title="Sync the crosshair time across panes" onClick={() => setDesk((d) => ({ ...d, syncCrosshair: !d.syncCrosshair }))}>Sync crosshair</button>
+          <button className={`toggle ${desk.syncTime ? "on" : ""}`} type="button" title="Pan and zoom every pane together" onClick={() => setDesk((d) => ({ ...d, syncTime: !d.syncTime }))}>Sync time</button>
+          <button className={`toggle ${desk.linkSymbol ? "on" : ""}`} type="button" title="The next symbol applies to every pane" onClick={() => setDesk((d) => ({ ...d, linkSymbol: !d.linkSymbol }))}>Link symbol</button>
           <div className="seg view-switch">
             <button className={view === "chart" ? "on" : ""} type="button" onClick={() => setView("chart")}>Chart</button>
             <button className={view === "curve" ? "on" : ""} type="button" onClick={() => setView("curve")}>Curve</button>
           </div>
         </div>
 
-        {view === "chart" && (
+        {(layoutShown > 1 || view === "chart") && (
           <>
-            <div className="banners">
+            {layoutShown === 1 && <div className="banners">
               {viewModel?.exactness && (
                 <p className="source-line">
                   {viewModel.exactness}
@@ -448,8 +452,8 @@ export function ChartWorkspace() {
                 </p>
               )}
               {status && <p className="source-line hint">{status}</p>}
-            </div>
-            {showingThis && bar && (
+            </div>}
+            {layoutShown === 1 && showingThis && bar && (
               <div className="legend-strip">
                 <span>O {fmt(bar.open, decimals)}</span>
                 <span>H {fmt(bar.high, decimals)}</span>
@@ -466,42 +470,48 @@ export function ChartWorkspace() {
                 {show.macd && <span>MACD {fmt(bar.macd, decimals)}</span>}
               </div>
             )}
-            <div className="stage">
-              <div className="chart-stage">
-                {unavailable && (
-                  <div className="error-state">
-                    <h2>{unavailable.name} is not charted</h2>
-                    {unavailable.ric && <p className="mono">{unavailable.ric}</p>}
-                    <p>{unavailable.reason}</p>
-                    {unavailable.licence && <p>{unavailable.licence}</p>}
-                  </div>
-                )}
-                {!unavailable && chartError && (
-                  <div className="error-state">
-                    <h2>Couldn't load {spread?.formula || ticker}</h2>
-                    <p>{chartError}</p>
-                    <p>No price has been substituted.</p>
-                    <button type="button" onClick={() => setRetry((n) => n + 1)}>Retry</button>
-                  </div>
-                )}
-                {showingThis && !chartError && (
-                  <Chart
-                    payload={payload}
-                    chartType={chartType}
-                    logScale={logScale}
-                    show={show}
-                    drawings={drawings}
+            <div className={`stage ${layoutShown > 1 ? "multi" : ""}`}>
+              <div className={`chart-grid n${layoutShown}`}>
+                {(narrow ? [desk.active] : Array.from({ length: Math.min(desk.layout, desk.panes.length) }, (_, i) => i)).map((index) => (
+                  <ChartPane
+                    key={index}
+                    ref={(handle) => { paneRefs.current[index] = handle; }}
+                    settings={desk.panes[index]}
+                    solo={layoutShown === 1}
+                    active={index === desk.active}
                     tool={tool}
                     compare={compare}
+                    listed={listed}
+                    quotes={quotes}
+                    spreads={spreads}
+                    now={now}
                     selectedId={selectedId}
-                    onDrawingsChange={changeDrawings}
                     onSelect={setSelectedId}
-                    onHover={setHover}
                     onStatus={setStatus}
+                    syncTime={desk.syncCrosshair && timeSync && timeSync.source !== index ? timeSync.time : null}
+                    syncRange={desk.syncTime && rangeSync && rangeSync.source !== index ? { from: rangeSync.from, to: rangeSync.to } : null}
+                    onActivate={() => setDesk((d) => (d.active === index ? d : { ...d, active: index }))}
+                    onSyncTime={(time) => {
+                      setTimeSync((prev) => {
+                        if (!desk.syncCrosshair) return prev;
+                        if (prev && prev.source === index && prev.time === time) return prev;
+                        return { time, source: index };
+                      });
+                    }}
+                    onSyncRange={(range) => {
+                      setRangeSync((prev) => {
+                        if (!desk.syncTime) return prev;
+                        if (prev && prev.source === index && Math.abs(prev.from - range.from) < 1 && Math.abs(prev.to - range.to) < 1) return prev;
+                        return { ...range, source: index };
+                      });
+                    }}
+                    onSnapshot={(next) => {
+                      if (activeRef.current === index) setSnap(next);
+                    }}
                   />
-                )}
-                {chartLoading && <div className="loading-bar" />}
+                ))}
               </div>
+              {layoutShown === 1 && view === "chart" && (
               <Inspector
                 bar={bar}
                 payload={payload}
@@ -513,25 +523,26 @@ export function ChartWorkspace() {
                 onDrawingsChange={changeDrawings}
                 onSelect={setSelectedId}
               />
+              )}
             </div>
           </>
         )}
 
-        {view === "curve" && (
+        {layoutShown === 1 && view === "curve" && (
           <div className="curve-stage">
             <div className="curve-switch">
               {curves.map((c) => (
-                <button key={c.id} className={curveId === c.id ? "on" : ""} type="button" onClick={() => setCurveId(c.id)}>{c.name}</button>
+                <button key={c.id} className={curveId === c.id ? "on" : ""} type="button" onClick={() => setCurvePick(c.id)}>{c.name}</button>
               ))}
             </div>
             {curveLoading && <div className="loading-bar" />}
-            {curveError && (
+            {bigCurveError && (
               <div className="error-state">
                 <h2>Couldn't load the {curveId} curve</h2>
-                <p>{curveError}</p>
+                <p>{bigCurveError}</p>
               </div>
             )}
-            {curve && curve.id === curveId && <CurveView data={curve} />}
+            {bigCurve && bigCurve.id === curveId && <CurveView data={bigCurve} />}
           </div>
         )}
         <footer className="foot">Public Yahoo Finance data, delayed. Not IG, not a point conversion, not advice.</footer>
