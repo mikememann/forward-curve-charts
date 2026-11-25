@@ -11,7 +11,9 @@
  * below because those series jump at rolls.
  *
  * Prices are Yahoo's native units. Nothing is rescaled to IG points.
+ * A market with `igEpic` can also show IG's own points, labelled separately.
  */
+import type { SourceChain } from "@/lib/types";
 
 export const GROUPS = [
   "Energy",
@@ -131,7 +133,22 @@ export interface Market {
   /** Server env var required before this series is fetched. Off when unset. */
   requiresEnv?: string;
   delayNote?: string;
+  /** IG epic for the read-only price history. Absent when IG does not list the market. */
+  igEpic?: string;
+  /** Second IG epic, kept for reference. The chart uses `igEpic`. */
+  igEpicAlt?: string;
+  /**
+   * Which feed to try first. IG points are not stitched onto the free series.
+   * Weekly and long daily history follow `history`.
+   */
+  sourceChain?: SourceChain;
 }
+
+/** IG true-OHLC candles first. Weekly and long daily history stay on the free feed. */
+export const IG_THEN_FREE: SourceChain = {
+  candles: ["ig", "free"],
+  history: ["free"],
+};
 
 export interface UnavailableSeries {
   id: string;
@@ -166,6 +183,8 @@ export const markets: Market[] = [
       "Yahoo's BZ month runs about one month ahead of ICE near expiry. This is NYMEX Brent Last Day Financial, which cash-settles to ICE Brent, not the ICE screen month itself.",
     licence: "Yahoo terms: free to view, personal use, no redistribution",
     attribution: "Yahoo Finance",
+    igEpic: "CC.D.LCO.USS.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "ttf",
@@ -187,6 +206,8 @@ export const markets: Market[] = [
     infoNote: "Near-exact CME stand-in for ICE Endex TTF. The free curve is only the first few months, not the full strip.",
     licence: "Yahoo terms: free to view, personal use, no redistribution",
     attribution: "Yahoo Finance",
+    igEpic: "EN.D.ICETTF.Month3.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "gbpusd",
@@ -204,6 +225,8 @@ export const markets: Market[] = [
     attribution: "Yahoo Finance",
     proxyNote:
       "Spot proxy for IG's GBP/USD Dec-26 forward. This is GBPUSD=X (spot), not the forward, and it is not scaled to IG's ×10,000 quote.",
+    igEpic: "CF.D.GBPUSD.DEC.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "gbpeur",
@@ -219,6 +242,8 @@ export const markets: Market[] = [
     ric: "GBPEUR=",
     licence: "Yahoo terms: free to view, personal use, no redistribution",
     attribution: "Yahoo Finance",
+    igEpic: "CS.D.GBPEUR.TODAY.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "gbpzar",
@@ -234,6 +259,8 @@ export const markets: Market[] = [
     ric: "GBPZAR=",
     licence: "Yahoo terms: free to view, personal use, no redistribution",
     attribution: "Yahoo Finance",
+    igEpic: "CS.D.GBPZAR.TODAY.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "gold",
@@ -256,6 +283,8 @@ export const markets: Market[] = [
       count: 16,
       note: "COMEX gold (GC) via Yahoo. Serial months often have no daily settlement on Yahoo; those points are gaps, not interpolated. Not a spot gold curve.",
     },
+    igEpic: "CS.D.USCGC.TODAY.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "cocoa",
@@ -270,8 +299,10 @@ export const markets: Market[] = [
       "Proxy for London cocoa. This is NY ICE cocoa in USD per tonne, not London cocoa in GBP per tonne. Different exchange, currency, and contract.",
     curve: {
       count: 10,
-      note: "NY cocoa (CC, USD/t) is the public stand-in for London cocoa (GBP/t). This is not the London curve. Months Yahoo does not return are gaps.",
+      note: "NY cocoa (CC, USD/t) is the public stand-in for London cocoa (GBP/t). This is not the London curve. Months Yahoo does not return are gaps. IG points, when shown, are a separate series and are not stitched onto this curve.",
     },
+    igEpic: "CC.D.LCC.USS.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "wheat",
@@ -289,8 +320,10 @@ export const markets: Market[] = [
     attribution: "Yahoo Finance",
     curve: {
       count: 10,
-      note: "CBOT wheat (ZW) in US cents per bushel. Listed months are Mar, May, Jul, Sep, Dec. Not IG points.",
+      note: "CBOT wheat (ZW) in US cents per bushel. Listed months are Mar, May, Jul, Sep, Dec. Not IG points. The IG series is separate and is not stitched on.",
     },
+    igEpic: "CO.D.W.Month1.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "sugar",
@@ -305,8 +338,10 @@ export const markets: Market[] = [
       "Proxy for London white sugar No.5. This is NY raw sugar No.11 in US cents per pound, not London No.5 in USD per tonne. Different contract and units.",
     curve: {
       count: 8,
-      note: "NY sugar No.11 (SB, USc/lb), listed Mar, May, Jul, Oct. Proxy only — London No.5 (USD/t) is not this curve. Missing months are gaps.",
+      note: "NY sugar No.11 (SB, USc/lb), listed Mar, May, Jul, Oct. Proxy only — London No.5 (USD/t) is not this curve. Missing months are gaps. IG points are not stitched onto this curve.",
     },
+    igEpic: "CC.D.LSU.USS.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "corn",
@@ -324,8 +359,10 @@ export const markets: Market[] = [
     attribution: "Yahoo Finance",
     curve: {
       count: 10,
-      note: "CBOT corn (ZC) in US cents per bushel. The chart defaults to the next liquid month (December is skipped once it is inside 25 days of expiry). The curve still includes December when Yahoo quotes it.",
+      note: "CBOT corn (ZC) in US cents per bushel. The chart defaults to the next liquid month (December is skipped once it is inside 25 days of expiry). The curve still includes December when Yahoo quotes it. IG points are not stitched on.",
     },
+    igEpic: "CC.D.C.USS.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "ftse",
@@ -340,6 +377,8 @@ export const markets: Market[] = [
     ric: ".FTSE",
     licence: "Yahoo terms: free to view, personal use, no redistribution",
     attribution: "Yahoo Finance",
+    igEpic: "IX.D.FTSE.DAILY.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "nvda",
@@ -349,6 +388,8 @@ export const markets: Market[] = [
     assetClass: "equity",
     decimals: 2,
     ticker: "NVDA",
+    igEpic: "UC.D.NVDA.DAILY.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "bp",
@@ -364,6 +405,8 @@ export const markets: Market[] = [
     ric: "BP.L",
     licence: "Yahoo terms: free to view, personal use, no redistribution",
     attribution: "Yahoo Finance",
+    igEpic: "KA.D.BP.DAILY.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "tesco",
@@ -379,6 +422,8 @@ export const markets: Market[] = [
     ric: "TSCO.L",
     licence: "Yahoo terms: free to view, personal use, no redistribution",
     attribution: "Yahoo Finance",
+    igEpic: "KA.D.TSCO.DAILY.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "vrtx",
@@ -388,6 +433,8 @@ export const markets: Market[] = [
     assetClass: "equity",
     decimals: 2,
     ticker: "VRTX",
+    igEpic: "UD.D.VRTX.DAILY.IP",
+    sourceChain: IG_THEN_FREE,
   },
 ];
 

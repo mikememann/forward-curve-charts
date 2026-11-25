@@ -1,4 +1,5 @@
 import { extraCurves, markets, type Exactness, type ExtraCurve, type Market, type NativeFrequency, type SourceKind } from "@/config/markets";
+import type { SourceChain } from "@/lib/types";
 import { lsegMarkets } from "@/config/lseg";
 import { resolveContract, type ContractInfo } from "@/lib/contracts";
 
@@ -49,6 +50,9 @@ export interface MarketView {
   nativeFrequency: NativeFrequency | null;
   requiresEnv: string | null;
   delayNote: string | null;
+  igEpic: string | null;
+  igEpicAlt: string | null;
+  sourceChain: SourceChain | null;
 }
 
 export function allCurves(): CurveDef[] {
@@ -117,6 +121,9 @@ export function presentMarket(m: Market, now = new Date()): MarketView {
     nativeFrequency: m.nativeFrequency ?? null,
     requiresEnv: m.requiresEnv ?? null,
     delayNote: m.delayNote ?? null,
+    igEpic: m.igEpic ?? null,
+    igEpicAlt: m.igEpicAlt ?? null,
+    sourceChain: m.sourceChain ?? null,
   };
 }
 

@@ -56,6 +56,9 @@ async function quoteForCustom(ticker: string): Promise<Quote> {
     nativeFrequency: null,
     requiresEnv: null,
     delayNote: null,
+    igEpic: null,
+    igEpicAlt: null,
+    sourceChain: null,
   };
   try {
     const q = await buildQuote(ticker, stub);

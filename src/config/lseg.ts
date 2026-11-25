@@ -5,7 +5,7 @@
  *
  * EBM=F is Micro Bitcoin Euro. It is not Euronext wheat and is not used.
  */
-import type { Market, UnavailableSeries } from "@/config/markets";
+import { IG_THEN_FREE, type Market, type UnavailableSeries } from "@/config/markets";
 
 const YAHOO = "Yahoo terms: free to view, personal use, no redistribution";
 const FRED = "Public domain (FRED / source agency)";
@@ -424,6 +424,10 @@ export const lsegMarkets: Market[] = [
     attribution: "FRED, IMF primary commodity prices",
     delayNote: "Monthly IMF average.",
     proxyNote: "IMF monthly robusta in US cents per pound. Not ICE Europe robusta in USD per tonne. RC=F and RM=F are not on Yahoo.",
+    igEpic: "CC.D.LKD.USS.IP",
+    igEpicAlt: "CO.D.LKD.Month3.IP",
+    sourceChain: IG_THEN_FREE,
+    infoNote: "IG epic CC.D.LKD.USS.IP is the DFB. CO.D.LKD.Month3.IP is the Jan-27 contract and is not the chart default. An IG search found no UK feed wheat epic, so that market stays off IG. ICE is not on this branch; the free leg is the IMF series.",
   },
   {
     id: "cot-sugar",
@@ -805,7 +809,7 @@ export const unavailableSeries: UnavailableSeries[] = [
   { id: "cocoa-stocks", name: "ICE cocoa certified stocks", group: "LSEG · Cocoa", ric: "COC-ARW-CI", licence: "Free to view only", reason: "ICE Report Center stocks are a manual download, not an API this app can chart." },
   { id: "cocoa-products", name: "Cocoa butter, liquor, powder", group: "LSEG · Cocoa", ric: "RFVCBLEUMKst1", licence: "Proprietary", reason: "Price-reporting assessments. No free source, so nothing is plotted." },
   { id: "cocoa-ratios", name: "Cocoa butter and liquor ratios", group: "LSEG · Cocoa", ric: "RFVCBLEURAMKst", licence: "Proprietary", reason: "Broker and PRA ratios. No free source." },
-  { id: "uk-wheat", name: "UK feed wheat", group: "LSEG · Main", ric: "LWBX6", licence: "Free to view (AHDB)", reason: "AHDB and ICE pages are view-only. No free API. Chicago wheat is a different contract and is not substituted." },
+  { id: "uk-wheat", name: "UK feed wheat", group: "LSEG · Main", ric: "LWBX6", licence: "Free to view (AHDB)", reason: "An IG search for feed wheat found nothing, so there is no IG epic. AHDB and ICE pages are view-only on this branch. Chicago wheat is a different contract and is not substituted." },
   { id: "matif-wheat", name: "Euronext milling wheat", group: "LSEG · Main", ric: "BL2c1", licence: "Free to view only", reason: "Euronext is view-only. Yahoo's EBM=F is Micro Bitcoin Euro, not wheat, and is excluded. Chicago wheat is not used as a stand-in." },
   { id: "matif-corn", name: "Euronext corn", group: "LSEG · Main", ric: "EMAc1", licence: "Free to view only", reason: "No free API (EMA=F 404s). CBOT corn is a different market and is not substituted." },
   { id: "rapeseed", name: "Euronext rapeseed", group: "LSEG · Main", ric: "COMc1", licence: "Free to view only", reason: "No free API (ECO=F 404s). The curve would have to be scraped expiry by expiry. Soybeans are not a substitute." },

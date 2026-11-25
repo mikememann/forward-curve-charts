@@ -54,6 +54,7 @@ export function ChartWorkspace() {
   const [armClear, setArmClear] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [retry, setRetry] = useState(0);
+  const [sourceMode, setSourceMode] = useState<"auto" | "ig" | "free">("auto");
   const listed = useMemo(() => (hydrated ? presentMarkets() : []), [hydrated]);
 
   useEffect(() => {
@@ -153,6 +154,7 @@ export function ChartWorkspace() {
     const q = spreadNow
       ? new URLSearchParams({ formula: spreadNow.formula, timeframe })
       : new URLSearchParams({ ticker, timeframe, market: viewModel?.id.startsWith("custom:") ? "" : viewModel?.id ?? "" });
+    if (!spreadNow && sourceMode !== "auto") q.set("source", sourceMode);
     fetch(`/api/ohlc?${q}`, { signal: ctrl.signal })
       .then(async (res) => {
         const body = (await res.json()) as OhlcResponse;
@@ -173,7 +175,7 @@ export function ChartWorkspace() {
       live = false;
       ctrl.abort();
     };
-  }, [hydrated, ticker, timeframe, viewModel?.id, retry, marketId, spreads]);
+  }, [hydrated, ticker, timeframe, viewModel?.id, retry, marketId, spreads, sourceMode]);
 
   useEffect(() => {
     if (!hydrated || view !== "curve") return;
@@ -245,6 +247,7 @@ export function ChartWorkspace() {
 
   function selectMarket(id: string) {
     setMarketId(id);
+    setSourceMode("auto");
     setNavOpen(false);
     const m = listed.find((x) => x.id === id);
     if (m?.intradayOnly && (timeframe === "1d" || timeframe === "1w")) setTimeframe("1h");
@@ -309,7 +312,7 @@ export function ChartWorkspace() {
             </h1>
             <p className="ticker-line">
               <span className="mono">{ticker}</span>
-              {viewModel?.units ? ` · ${viewModel.units}` : ""}
+              {showingThis && payload?.units ? ` · ${payload.units}` : viewModel?.units ? ` · ${viewModel.units}` : ""}
               {viewModel?.pence ? " · pence, not pounds" : ""}
             </p>
           </div>
@@ -338,6 +341,13 @@ export function ChartWorkspace() {
             ))}
           </div>
           <button className={`toggle ${logScale ? "on" : ""}`} type="button" onClick={() => setLogScale((v) => !v)}>Log</button>
+          {viewModel?.igEpic && (
+            <div className="seg" aria-label="Data source">
+              <button className={sourceMode === "auto" ? "on" : ""} type="button" onClick={() => setSourceMode("auto")}>Auto</button>
+              <button className={sourceMode === "free" ? "on" : ""} type="button" title="Yahoo, FRED or the other free feed. Not converted into IG points." onClick={() => setSourceMode("free")}>Free</button>
+              <button className={sourceMode === "ig" ? "on" : ""} type="button" title="IG spread-bet points, true OHLC. Read-only." onClick={() => setSourceMode("ig")}>IG</button>
+            </div>
+          )}
           {viewModel?.continuous && viewModel.contractTicker && (
             <div className="seg">
               <button className={seriesMode === "contract" ? "on" : ""} type="button" onClick={() => setSeriesMode("contract")}>{viewModel.contractLabel}</button>
@@ -439,6 +449,13 @@ export function ChartWorkspace() {
               {seriesMode === "continuous" && <p className="banner warn"><b>Back-adjusted continuous {ticker}.</b> Yahoo splices the rolls, so levels and percentage changes will not match the specific contract.</p>}
               {viewModel?.pence && <p className="banner">Quoted in pence (p), not pounds.</p>}
               {(quote?.stale || payload?.stale) && <p className="banner warn"><b>No fresh quote.</b> {payload?.staleReason || `Last updated ${quote?.lastUpdatedLabel}. The last figure is not a current price.`}</p>}
+              {showingThis && payload?.priceSource && (
+                <p className="source-line">
+                  Live source: {payload.priceSource === "ig" ? "IG price (IG points)" : payload.source}
+                  {payload.igAllowance ? ` · allowance ${payload.igAllowance.remaining.toLocaleString("en-GB")} / ${payload.igAllowance.total.toLocaleString("en-GB")}` : ""}
+                </p>
+              )}
+              {payload?.warnings?.map((w) => <p key={w} className="banner warn">{w}</p>)}
               {payload && (
                 <p className="source-line">
                   {payload.source} · {payload.delayNote} Times are UK (Europe/London). Last bar {payload.lastBarUnix ? formatLondon(payload.lastBarUnix) : "n/a"}
@@ -689,6 +706,9 @@ function customView(c: CustomSymbol | undefined): MarketView | null {
     nativeFrequency: null,
     requiresEnv: null,
     delayNote: null,
+    igEpic: null,
+    igEpicAlt: null,
+    sourceChain: null,
   };
 }
 
