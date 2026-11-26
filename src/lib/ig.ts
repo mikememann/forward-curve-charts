@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { igCall } from "@/lib/igAllow";
-import { extraPageNumbers, mergeBars, pageQuery, parseIgPrices, priceQuery, type IgAllowance, type IgPageData, type IgPricesBody } from "@/lib/igParse";
+import { barsFromCache, extraPageNumbers, mergeBars, pageQuery, parseIgPrices, priceQuery, type IgAllowance, type IgPageData, type IgPricesBody } from "@/lib/igParse";
 import type { Bar, Timeframe } from "@/lib/types";
 
 /**
@@ -25,6 +25,9 @@ const RESOLUTION: Record<"15m" | "1h" | "1d", string> = {
 
 const CHUNK = 100;
 
+// Session and the weekly allowance live in this process only. They are not read from KV.
+// A KV payload for either one would go through sessionFromCache / allowanceFromCache,
+// which accept a JSON string or an already-parsed object and reject anything else.
 let session: { cst: string; token: string } | null = null;
 let allowance: IgAllowance | null = null;
 
@@ -98,17 +101,12 @@ async function readBars(key: string): Promise<Bar[]> {
       headers: { Authorization: `Bearer ${kvToken}` },
     });
     if (!res.ok) return [];
-    const body = (await res.json()) as { result?: string | null };
-    if (!body.result) return [];
-    try {
-      return JSON.parse(body.result) as Bar[];
-    } catch {
-      return [];
-    }
+    const body: unknown = await res.json();
+    return barsFromCache(body) ?? [];
   }
   try {
     const raw = await readFile(fileFor(key), "utf8");
-    return JSON.parse(raw) as Bar[];
+    return barsFromCache(raw) ?? [];
   } catch {
     return [];
   }
@@ -119,10 +117,12 @@ async function writeBars(key: string, bars: Bar[]): Promise<void> {
   const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
   const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
   if (kvUrl && kvToken) {
-    await fetch(`${kvUrl}/set/${encodeURIComponent(key)}`, {
+    // Command form stores one JSON string. POST /set with a JSON array body
+    // can be read as a pipeline, and stringifying a string stores an extra pair of quotes.
+    await fetch(kvUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${kvToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(["SET", key, payload]),
     });
     return;
   }
@@ -140,6 +140,7 @@ export async function loadIgBars(epic: string, timeframe: "15m" | "1h" | "1d", w
   const resolution = RESOLUTION[timeframe];
   const key = storeKey(epic, resolution);
   let bars = await readBars(key);
+  if (!Array.isArray(bars)) bars = [];
   const period = timeframe === "15m" ? 900 : timeframe === "1h" ? 3600 : 86_400;
   const newest = bars.at(-1)?.time ?? 0;
   const fresh = newest > Math.floor(Date.now() / 1000) - period * 2;

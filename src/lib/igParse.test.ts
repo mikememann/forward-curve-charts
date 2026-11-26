@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extraPageNumbers, igMid, mergeBars, pageQuery, parseIgPrices, priceQuery } from "./igParse";
+import { allowanceFromCache, barsFromCache, extraPageNumbers, igMid, mergeBars, pageQuery, parseIgPrices, priceQuery, sessionFromCache } from "./igParse";
 
 test("OHLC is the mid of bid and ask", () => {
   assert.equal(igMid({ bid: 9047.5, ask: 9048.5, lastTraded: null }), 9048);
@@ -62,6 +62,35 @@ test("a paged DAY history keeps the newest page, for MINUTE_15 and HOUR too", ()
   assert.equal(newest.at(-1)?.time, Date.parse("2026-11-26T00:00:00Z") / 1000);
   assert.ok(newest.every((bar, i) => i === 0 || bar.time > newest[i - 1].time));
   assert.equal(page1.bars.at(-1)?.time, Date.parse("2026-10-20T00:00:00Z") / 1000);
+});
+
+const sample = [{ time: 1_700_000_000, open: 10, high: 12, low: 9, close: 11, volume: 4 }];
+
+test("KV cache accepts a JSON string or an already-parsed value, and rejects anything else", () => {
+  const asString = { result: JSON.stringify(sample) };
+  const asParsed = { result: sample };
+  const doubleEncoded = { result: JSON.stringify(JSON.stringify(sample)) };
+  assert.deepEqual(barsFromCache(asString), sample);
+  assert.deepEqual(barsFromCache(asParsed), sample);
+  assert.deepEqual(barsFromCache(doubleEncoded), sample);
+  assert.deepEqual(barsFromCache(JSON.stringify(sample)), sample);
+  assert.equal(barsFromCache({ result: { not: "bars" } }), null);
+  assert.equal(barsFromCache({ result: "not-json" }), null);
+  assert.equal(barsFromCache({ result: null }), null);
+  assert.ok(Array.isArray(barsFromCache(doubleEncoded)));
+  assert.deepEqual(barsFromCache(doubleEncoded)?.map((bar) => bar.close), [11]);
+
+  const allowance = { remainingAllowance: 9000, totalAllowance: 10000, allowanceExpiry: 50 };
+  assert.deepEqual(allowanceFromCache({ result: JSON.stringify(allowance) }), allowance);
+  assert.deepEqual(allowanceFromCache({ result: allowance }), allowance);
+  assert.equal(allowanceFromCache({ result: JSON.stringify({ remainingAllowance: "9000" }) }), null);
+  assert.equal(allowanceFromCache({ result: sample }), null);
+
+  const session = { cst: "abc", token: "def" };
+  assert.deepEqual(sessionFromCache({ result: JSON.stringify(session) }), session);
+  assert.deepEqual(sessionFromCache({ result: session }), session);
+  assert.equal(sessionFromCache({ result: { cst: "", token: "def" } }), null);
+  assert.equal(sessionFromCache({ result: "\"nope\"" }), null);
 });
 
 test("merging bars replaces the same timestamp and keeps older history", () => {

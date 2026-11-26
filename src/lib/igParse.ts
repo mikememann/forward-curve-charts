@@ -109,6 +109,77 @@ export function parseIgPrices(body: IgPricesBody): { bars: Bar[]; allowance: IgA
   return { bars, allowance };
 }
 
+/**
+ * Upstash and Vercel KV REST return `{ result }`. The value may already be
+ * parsed (array or object) or still be a JSON string, sometimes twice,
+ * because the writer stored `JSON.stringify` of a string.
+ * Anything that is not the expected shape is a cache miss.
+ */
+export function decodeKv(input: unknown): unknown {
+  let value = input;
+  for (let i = 0; i < 2 && isEnvelope(value); i++) value = value.result;
+  for (let i = 0; i < 3 && typeof value === "string"; i++) {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      break;
+    }
+  }
+  return value;
+}
+
+function isEnvelope(value: unknown): value is { result: unknown } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return "result" in value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function barsFromCache(input: unknown): Bar[] | null {
+  const value = decodeKv(input);
+  if (!Array.isArray(value)) return null;
+  const bars: Bar[] = [];
+  for (const row of value) {
+    if (!isRecord(row)) return null;
+    const time = row.time;
+    const open = row.open;
+    const high = row.high;
+    const low = row.low;
+    const close = row.close;
+    if (typeof time !== "number" || typeof open !== "number" || typeof high !== "number" || typeof low !== "number" || typeof close !== "number") return null;
+    bars.push({
+      time,
+      open,
+      high,
+      low,
+      close,
+      volume: typeof row.volume === "number" ? row.volume : 0,
+    });
+  }
+  return bars;
+}
+
+export function allowanceFromCache(input: unknown): IgAllowance | null {
+  const value = decodeKv(input);
+  if (!isRecord(value)) return null;
+  if (typeof value.remainingAllowance !== "number" || typeof value.totalAllowance !== "number") return null;
+  return {
+    remainingAllowance: value.remainingAllowance,
+    totalAllowance: value.totalAllowance,
+    allowanceExpiry: typeof value.allowanceExpiry === "number" ? value.allowanceExpiry : 0,
+  };
+}
+
+/** Session tokens are not written to KV today. This is the same read rule if a payload is ever stored. */
+export function sessionFromCache(input: unknown): { cst: string; token: string } | null {
+  const value = decodeKv(input);
+  if (!isRecord(value)) return null;
+  if (typeof value.cst !== "string" || typeof value.token !== "string" || !value.cst || !value.token) return null;
+  return { cst: value.cst, token: value.token };
+}
+
 /** Keep the newest bar for each timestamp. */
 export function mergeBars(existing: Bar[], incoming: Bar[]): Bar[] {
   const byTime = new Map<number, Bar>();
