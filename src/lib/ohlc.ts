@@ -4,8 +4,10 @@ import { loadExternal } from "@/lib/sources";
 import { delayNoteFor, findMarketByTicker, type MarketView } from "@/lib/marketModel";
 import { bucketBars } from "@/lib/bucket";
 import { resolveContract } from "@/lib/contracts";
+import { currentAllowance, igConfigured, loadIgBars } from "@/lib/ig";
 import { loadIceSeries } from "@/lib/ice";
 import { enrich, lastSma } from "@/lib/indicators";
+import { chooseFeed } from "@/lib/sourceChain";
 import { formatLondon, isStaleQuote } from "@/lib/time";
 import type { OhlcResponse, Timeframe } from "@/lib/types";
 import { yahooChart, YahooError } from "@/lib/yahoo";
@@ -44,6 +46,8 @@ export async function loadOhlc(opts: {
   timeframe: Timeframe;
   bars?: number;
   market?: MarketView | null;
+  /** "auto" follows the market's source chain. */
+  source?: "auto" | "ig" | "free";
   /** ICE delivery strip, e.g. "Dec26" or "Dec 2026". Empty uses the front contract. */
   strip?: string | null;
 }): Promise<OhlcResponse> {
@@ -51,6 +55,55 @@ export async function loadOhlc(opts: {
   const market = opts.market === undefined ? findMarketByTicker(ticker) : opts.market;
   const want = clamp(opts.bars ?? defaultBars(timeframe), 20, 5000);
   const warnings: string[] = [];
+  if (market?.igEpic || market?.sourceChain) {
+    const requested = opts.bars ?? (timeframe === "1d" ? 120 : timeframe === "1w" ? want : timeframe === "1h" ? 120 : 64);
+    const choice = chooseFeed({
+      chain: market.sourceChain,
+      timeframe,
+      requestedBars: requested,
+      epic: market.igEpic,
+      configured: igConfigured(),
+      allowanceRemaining: currentAllowance()?.remainingAllowance ?? null,
+      override: opts.source ?? "auto",
+    });
+    if (choice.reason) warnings.push(choice.reason);
+    if (choice.feed === "ig" && market.igEpic && (timeframe === "15m" || timeframe === "1h" || timeframe === "1d")) {
+      try {
+        const loaded = await loadIgBars(market.igEpic, timeframe, choice.igBars);
+        if (loaded.bars.length) {
+          const enriched = enrich(loaded.bars);
+          const sma200Daily = timeframe === "1d" ? enriched.at(-1)?.sma200 ?? null : null;
+          const body = pack(enriched, {
+            currency: null,
+            shortName: market.igEpic,
+            exchangeName: "IG",
+            instrumentType: null,
+            regularMarketPrice: enriched.at(-1)?.close ?? null,
+          }, {
+            ticker: market.igEpic,
+            timeframe,
+            market,
+            sma200Daily,
+            warnings,
+            quoteTime: enriched.at(-1)?.time ?? null,
+            sourceLabel: "IG Markets",
+            units: "IG points",
+            infoNote: "IG price (IG points). This is how the spread-bet market is quoted. It is not a conversion of the free-data chart, and the two are not stitched together.",
+            delayNote: "IG historical prices from a spread-bet account. Read-only.",
+            priceSource: "ig",
+          });
+          body.priceSource = "ig";
+          body.igAllowance = loaded.allowance
+            ? { remaining: loaded.allowance.remainingAllowance, total: loaded.allowance.totalAllowance, expirySeconds: loaded.allowance.allowanceExpiry }
+            : null;
+          return body;
+        }
+        warnings.push("IG returned no prices. Showing the free series.");
+      } catch (e) {
+        warnings.push(`IG did not load (${e instanceof Error ? e.message : "request failed"}). Showing the free series.`);
+      }
+    }
+  }
   if (market?.sourceKind === "ice" && market.ice) {
     try {
       return await loadIceOhlc(market, timeframe, want, opts.strip ?? null);
@@ -58,7 +111,7 @@ export async function loadOhlc(opts: {
       if (!market.iceFallback) throw e instanceof DataError ? e : new DataError(e instanceof Error ? e.message : "ICE request failed", market.id);
       const message = e instanceof Error ? e.message : "ICE request failed";
       const standIn = fallbackView(market);
-      const body = await loadOhlc({ ticker: standIn.ticker, timeframe, bars: want, market: standIn });
+      const body = await loadOhlc({ ticker: standIn.ticker, timeframe, bars: want, market: standIn, source: "free" });
       body.warnings = [`ICE charting did not load (${message}). These endpoints are undocumented and may have changed. Showing the old stand-in.`, ...body.warnings];
       body.proxyNote = standIn.proxyNote;
       body.exactness = "proxy";
@@ -237,12 +290,16 @@ function pack(
     warnings: string[];
     quoteTime: number | null;
     sourceLabel?: string;
+    units?: string;
+    infoNote?: string;
+    delayNote?: string;
+    priceSource?: "ig" | "free";
     contractLabel?: string | null;
   },
 ): OhlcResponse {
   const last = bars[bars.length - 1];
   const lastBarUnix = last?.time ?? null;
-  const stale = Boolean(ctx.market?.hideStale && isStaleQuote(lastBarUnix));
+  const stale = Boolean(ctx.priceSource !== "ig" && ctx.market?.hideStale && isStaleQuote(lastBarUnix));
   const now = Date.now();
   const quoteStamp = ctx.quoteTime;
   const metaFresh = quoteStamp != null && lastBarUnix != null && lastBarUnix - quoteStamp < 5 * 86_400;
@@ -263,20 +320,21 @@ function pack(
     marketId: ctx.market?.id ?? null,
     name: ctx.market?.name ?? null,
     timeframe: ctx.timeframe,
-    currency: ctx.market?.pence ? "GBp" : meta.currency,
-    units: ctx.market?.units ?? null,
-    pence: Boolean(ctx.market?.pence),
+    currency: ctx.priceSource === "ig" ? null : ctx.market?.pence ? "GBp" : meta.currency,
+    units: ctx.units ?? ctx.market?.units ?? null,
+    pence: ctx.priceSource === "ig" ? false : Boolean(ctx.market?.pence),
     instrumentName: meta.shortName,
     exchange: meta.exchangeName,
     contractLabel: continuous ? null : ctx.contractLabel ?? ctx.market?.contractLabel ?? null,
     continuous,
     proxyNote: ctx.market?.proxyNote ?? null,
-    infoNote: ctx.market?.infoNote ?? null,
+    infoNote: ctx.infoNote ?? ctx.market?.infoNote ?? null,
     exactness: ctx.market?.exactness ?? null,
     licence: ctx.market?.licence ?? null,
     attribution: ctx.market?.attribution ?? null,
     source: ctx.sourceLabel ?? "Yahoo Finance",
-    delayNote: ctx.market?.delayNote ?? delayNoteFor(asset, Boolean(ctx.market?.fxClose22)),
+    delayNote: ctx.delayNote ?? ctx.market?.delayNote ?? delayNoteFor(asset, Boolean(ctx.market?.fxClose22)),
+    priceSource: ctx.priceSource ?? "free",
     times: "Europe/London",
     fetchedAt: new Date(now).toISOString(),
     lastBarUnix,

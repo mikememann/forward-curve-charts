@@ -122,6 +122,7 @@ function ChartPaneInner(props: Props, ref: ForwardedRef<PaneHandle>) {
           market: viewModel && !viewModel.id.startsWith("custom:") ? viewModel.id : "",
         });
     if (!spread && viewModel?.sourceKind === "ice") params.set("strip", settings.strip || "front");
+    if (!spread && settings.source && settings.source !== "auto") params.set("source", settings.source);
     const url = `/api/ohlc?${params}`;
     fetchOhlc(url)
       .then((body) => {
@@ -139,7 +140,7 @@ function ChartPaneInner(props: Props, ref: ForwardedRef<PaneHandle>) {
     return () => {
       live = false;
     };
-  }, [unavailable, spread, ticker, settings.timeframe, settings.strip, viewModel?.id, viewModel?.sourceKind, retry]);
+  }, [unavailable, spread, ticker, settings.timeframe, settings.strip, settings.source, viewModel?.id, viewModel?.sourceKind, retry]);
 
   const curveKey = settings.view === "curve" ? (viewModel?.curveId ?? settings.marketId) : null;
   useEffect(() => {

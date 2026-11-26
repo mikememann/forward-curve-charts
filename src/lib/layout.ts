@@ -13,6 +13,8 @@ export interface PaneSettings {
   view: "chart" | "curve";
   /** ICE delivery strip. "front" rolls past a month that is near expiry. */
   strip: string;
+  /** Per-pane override of the source chain. */
+  source: "auto" | "ig" | "free";
 }
 
 export interface DeskLayout {
@@ -49,6 +51,7 @@ export function paneSettings(marketId: string, timeframe: Timeframe = "1d", seri
     show: { ...DEFAULT_TOGGLES },
     view: "chart",
     strip: "front",
+    source: "auto",
   };
 }
 
@@ -127,11 +130,12 @@ function encodePane(p: PaneSettings): string {
   const mode = p.seriesMode === "continuous" ? "x" : "c";
   const view = p.view === "curve" ? "v" : "h";
   const type = p.chartType === "line" ? "l" : p.chartType === "ohlc" ? "o" : "k";
-  return [p.marketId, p.timeframe, mode, view, type, p.logScale ? "1" : "0", maskOf(p.show), p.strip || "front"].join(".");
+  const source = p.source === "ig" ? "i" : p.source === "free" ? "f" : "a";
+  return [p.marketId, p.timeframe, mode, view, type, p.logScale ? "1" : "0", maskOf(p.show), p.strip || "front", source].join(".");
 }
 
 function decodePane(raw: string): PaneSettings | null {
-  const [marketId, tf, mode, view, type, log, mask, strip] = raw.split(".");
+  const [marketId, tf, mode, view, type, log, mask, strip, source] = raw.split(".");
   if (!marketId || !TF.has(tf as Timeframe)) return null;
   return {
     marketId,
@@ -142,6 +146,7 @@ function decodePane(raw: string): PaneSettings | null {
     logScale: log === "1",
     show: mask ? showOf(mask) : { ...DEFAULT_TOGGLES },
     strip: strip || "front",
+    source: source === "i" ? "ig" : source === "f" ? "free" : "auto",
   };
 }
 

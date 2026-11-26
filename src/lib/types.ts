@@ -1,5 +1,18 @@
 export type Timeframe = "15m" | "1h" | "1d" | "1w";
 
+/** "free" is the market's existing feed (Yahoo, FRED, and so on). It is not converted into IG points. */
+export type Feed = "ig" | "free";
+
+/**
+ * Per-market order. `candles` is 15m, 1h and a short daily window.
+ * `history` is weekly and any daily request longer than the IG window.
+ * IG points are a different unit, so the two feeds are never stitched.
+ */
+export interface SourceChain {
+  candles: Feed[];
+  history: Feed[];
+}
+
 export interface Bar {
   time: number;
   open: number;
@@ -71,6 +84,9 @@ export interface OhlcResponse {
   sma200Daily: number | null;
   warnings: string[];
   bars: EnrichedBar[];
+  /** Which feed produced these bars. */
+  priceSource?: "ig" | "free";
+  igAllowance?: { remaining: number; total: number; expirySeconds: number } | null;
   /** ICE delivery months, when this chart is an ICE contract. */
   iceContracts?: { marketId: number; strip: string; label: string; nearExpiry?: boolean }[];
   /** Strip actually plotted, e.g. "Dec26". */

@@ -89,6 +89,50 @@ The layout and each pane’s settings are saved in `localStorage` (`mm-charts:la
 | Delay | Every chart shows **Yahoo Finance**, the delay note (futures are typically 10–30 minutes), the last bar in UK time, and the age of the quote timestamp. |
 | Units | Yahoo’s native units. Not IG points. |
 
+## IG Markets
+
+IG is an optional read-only source for Mike's spread-betting account. The server calls only `/session`, `/watchlists`, `/markets` and `/prices`. Paths such as `/positions`, `/workingorders` and `/confirms` throw before a request is sent. Credentials never go to the browser.
+
+Set these on the server (Vercel project env):
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `IG_API_KEY` | yes | `X-IG-API-KEY` |
+| `IG_USERNAME` | yes | session `identifier` |
+| `IG_PASSWORD` | yes | session password |
+| `IG_ACC_TYPE` | no | `LIVE` (default) or `DEMO`. Demo uses `https://demo-api.ig.com/gateway/deal` |
+
+Without those three, every chart stays on its free feed and the IG watchlist row says the credentials are missing.
+
+Historical bars are cached. When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set (Vercel KV or Upstash), the cache is stored there. Otherwise it is a file under `IG_CACHE_DIR` or the temp directory. The client asks only for the missing tail, in chunks of 100 points. The chart shows the remaining weekly allowance (10,000 points). Under 500 remaining, the chart uses the free feed.
+
+IG prices are displayed as **IG price (IG points)**. They are not a rescaled copy of the Yahoo or ICE series, and the two are not joined into one line. Forward curves stay on ICE for the London softs and on Yahoo for the other futures. The free leg of an IG market is that market's own feed: Yahoo, or ICE for London cocoa, white sugar, robusta and UK feed wheat. UK feed wheat has no IG epic.
+
+The visible chart does not preload every market. Auto mode fetches one short window: 64×15m, 120×1h or 120×1d points. Opening all 15 MM markets on the default daily chart is 15 × 120 = 1,800 points. Loading every market at the caps (300 daily plus 200 hourly) would be 15 × 500 = 7,500 points, so that is not the default.
+
+| Market | Epic | 15m / 1h / short 1d | Weekly and long 1d |
+|---|---|---|---|
+| Brent | `CC.D.LCO.USS.IP` | IG, then free | Free |
+| EU TTF | `EN.D.ICETTF.Month3.IP` | IG, then free | Free |
+| GBP/USD | `CF.D.GBPUSD.DEC.IP` | IG, then free | Free |
+| GBP/EUR | `CS.D.GBPEUR.TODAY.IP` | IG, then free | Free |
+| GBP/ZAR | `CS.D.GBPZAR.TODAY.IP` | IG, then free | Free |
+| Spot gold | `CS.D.USCGC.TODAY.IP` | IG, then free | Free |
+| London cocoa | `CC.D.LCC.USS.IP` | IG, then ICE | ICE |
+| Chicago wheat | `CO.D.W.Month1.IP` | IG, then Yahoo | Yahoo |
+| London sugar No.5 | `CC.D.LSU.USS.IP` | IG, then ICE | ICE |
+| Corn | `CC.D.C.USS.IP` | IG, then free | Free |
+| FTSE 100 | `IX.D.FTSE.DAILY.IP` | IG, then free | Free |
+| NVIDIA | `UC.D.NVDA.DAILY.IP` | IG, then free | Free |
+| BP | `KA.D.BP.DAILY.IP` | IG, then free | Free |
+| Tesco | `KA.D.TSCO.DAILY.IP` | IG, then free | Free |
+| Vertex | `UD.D.VRTX.DAILY.IP` | IG, then free | Free |
+| Robusta | `CC.D.LKD.USS.IP` (DFB). Jan-27 is `CO.D.LKD.Month3.IP` | IG, then ICE | ICE |
+| UK feed wheat | none. An IG search for “feed wheat” found nothing | ICE only | ICE only |
+| LSEG macro, FRED, BoE and the rest | none | Unchanged | Unchanged |
+
+`/api/ohlc` accepts `source=ig` or `source=free`. Omitting it follows the chain. Each chart pane has its own Auto / Free / IG switch.
+
 ## ICE London softs
 
 London cocoa, white sugar No.5, robusta coffee and UK feed wheat use ICE's charting JSON. These routes are **undocumented and may change**. The server sends a browser User-Agent. If a request fails, the chart says so. Cocoa, sugar and robusta then show the old stand-in, labelled. UK feed wheat does not fall back to Chicago wheat.

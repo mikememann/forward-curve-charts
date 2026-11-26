@@ -5,7 +5,7 @@
  *
  * EBM=F is Micro Bitcoin Euro. It is not Euronext wheat and is not used.
  */
-import { ICE_LICENCE, type Market, type UnavailableSeries } from "@/config/markets";
+import { ICE_LICENCE, IG_THEN_FREE, type Market, type UnavailableSeries } from "@/config/markets";
 
 const YAHOO = "Yahoo terms: free to view, personal use, no redistribution";
 const FRED = "Public domain (FRED / source agency)";
@@ -437,10 +437,13 @@ export const lsegMarkets: Market[] = [
     licence: ICE_LICENCE,
     attribution: "ICE Futures Europe",
     delayNote: "Delayed. Close-only.",
-    infoNote: "ICE Robusta Coffee, delayed, close-based, USD/t. Coffee C (KC) is arabica, a different contract, offered only as an optional true-OHLC comparison. The IMF monthly series is the fallback if ICE does not answer. These endpoints are undocumented and may change.",
+    infoNote: "ICE Robusta Coffee, delayed, close-based, USD/t. The chart epic is the DFB CC.D.LKD.USS.IP; Jan-27 is CO.D.LKD.Month3.IP. Coffee C (KC) is arabica, offered only as an optional true-OHLC comparison. UK feed wheat has no IG epic. These endpoints are undocumented and may change.",
     curve: {
-      note: "ICE robusta (USD/t), delayed lasts. Months the charting list does not return are absent. Not the IMF monthly average.",
+      note: "ICE robusta (USD/t), delayed lasts. Months the charting list does not return are absent. Not the IMF monthly average. IG points are not stitched onto this curve.",
     },
+    igEpic: "CC.D.LKD.USS.IP",
+    igEpicAlt: "CO.D.LKD.Month3.IP",
+    sourceChain: IG_THEN_FREE,
   },
   {
     id: "cot-sugar",

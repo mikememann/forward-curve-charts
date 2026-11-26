@@ -104,7 +104,7 @@ export function ChartWorkspace() {
       if (strip && fromUrl.panes[fromUrl.active]) fromUrl.panes[fromUrl.active].strip = strip;
       setDesk(fromUrl);
     } else if (savedLayout && savedLayout.panes?.length && savedLayout.panes.every((p) => p && p.marketId && p.show)) {
-      setDesk({ ...savedLayout, panes: savedLayout.panes.map((p) => ({ ...p, strip: p.strip || "front" })) });
+      setDesk({ ...savedLayout, panes: savedLayout.panes.map((p) => ({ ...p, strip: p.strip || "front", source: p.source || "auto" })) });
     } else {
       const tf = url.get("tf");
       const id = url.get("m") || prefs?.marketId || "brent";
@@ -251,7 +251,8 @@ export function ChartWorkspace() {
       timeframe: m?.intradayOnly && (p.timeframe === "1d" || p.timeframe === "1w") ? "1h" : p.timeframe,
       view: p.view === "curve" && m && !m.curveId ? "chart" : p.view,
       strip: "front",
-      chartType: m?.sourceKind === "ice" ? "line" : p.chartType,
+      source: "auto",
+      chartType: m?.sourceKind === "ice" && m.igEpic ? p.chartType : m?.sourceKind === "ice" ? "line" : p.chartType,
     }), true);
   }
 
@@ -319,7 +320,7 @@ export function ChartWorkspace() {
             </h1>
             <p className="ticker-line">
               <span className="mono">{ticker}</span>
-              {viewModel?.units ? ` · ${viewModel.units}` : ""}
+              {showingThis && payload?.units ? ` · ${payload.units}` : viewModel?.units ? ` · ${viewModel.units}` : ""}
               {viewModel?.pence ? " · pence, not pounds" : ""}
             </p>
           </div>
@@ -348,6 +349,13 @@ export function ChartWorkspace() {
             ))}
           </div>
           <button className={`toggle ${logScale ? "on" : ""}`} type="button" onClick={() => setLogScale((v) => !v)}>Log</button>
+          {viewModel?.igEpic && (
+            <div className="seg" aria-label="Data source">
+              <button className={(pane.source || "auto") === "auto" ? "on" : ""} type="button" onClick={() => updateActive({ source: "auto" })}>Auto</button>
+              <button className={pane.source === "free" ? "on" : ""} type="button" title="The free feed for this market. Not converted into IG points." onClick={() => updateActive({ source: "free" })}>Free</button>
+              <button className={pane.source === "ig" ? "on" : ""} type="button" title="IG spread-bet points, true OHLC. Read-only." onClick={() => updateActive({ source: "ig" })}>IG</button>
+            </div>
+          )}
           {payload?.iceContracts && payload.iceContracts.length > 0 && showingThis && (
             <label className="compare">
               Contract
@@ -483,6 +491,13 @@ export function ChartWorkspace() {
               {seriesMode === "continuous" && <p className="banner warn"><b>Back-adjusted continuous {ticker}.</b> Yahoo splices the rolls, so levels and percentage changes will not match the specific contract.</p>}
               {viewModel?.pence && <p className="banner">Quoted in pence (p), not pounds.</p>}
               {(quote?.stale || payload?.stale) && <p className="banner warn"><b>No fresh quote.</b> {payload?.staleReason || `Last updated ${quote?.lastUpdatedLabel}. The last figure is not a current price.`}</p>}
+              {showingThis && payload?.priceSource && (
+                <p className="source-line">
+                  Live source: {payload.priceSource === "ig" ? "IG price (IG points)" : payload.source}
+                  {payload.igAllowance ? ` · allowance ${payload.igAllowance.remaining.toLocaleString("en-GB")} / ${payload.igAllowance.total.toLocaleString("en-GB")}` : ""}
+                </p>
+              )}
+              {payload?.warnings?.map((w) => <p key={w} className="banner warn">{w}</p>)}
               {payload && (
                 <p className="source-line">
                   {payload.source} · {payload.delayNote} Times are UK (Europe/London). Last bar {payload.lastBarUnix ? formatLondon(payload.lastBarUnix) : "n/a"}
@@ -744,6 +759,9 @@ function customView(c: CustomSymbol | undefined): MarketView | null {
     nativeFrequency: null,
     requiresEnv: null,
     delayNote: null,
+    igEpic: null,
+    igEpicAlt: null,
+    sourceChain: null,
     ice: null,
     iceFallback: null,
   };

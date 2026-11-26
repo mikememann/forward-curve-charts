@@ -31,6 +31,47 @@ export function Watchlist(props: Props) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<{ symbol: string; name: string; type: string; exchange: string }[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [igNote, setIgNote] = useState<string | null>(null);
+  const [igRows, setIgRows] = useState<{ id: string; name: string; sub: string; bid: number | null; offer: number | null }[]>([]);
+
+  useEffect(() => {
+    let stop = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/ig/watchlist");
+        const body = (await res.json()) as {
+          available?: boolean;
+          reason?: string;
+          markets?: { epic: string; name: string; expiry: string | null; bid: number | null; offer: number | null }[];
+        };
+        if (stop) return;
+        if (!body.available) {
+          setIgNote(body.reason ?? "IG is not configured.");
+          setIgRows([]);
+          return;
+        }
+        setIgNote(null);
+        setIgRows((body.markets ?? []).map((row) => {
+          const known = props.markets.find((m) => m.igEpic === row.epic || m.igEpicAlt === row.epic);
+          return {
+            id: known?.id ?? row.epic,
+            name: known?.name ?? row.name,
+            sub: row.expiry ? `${row.epic} · ${row.expiry}` : row.epic,
+            bid: row.bid,
+            offer: row.offer,
+          };
+        }));
+      } catch {
+        if (!stop) setIgNote("IG watchlist could not be loaded.");
+      }
+    }
+    void load();
+    const timer = setInterval(load, 5 * 60_000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [props.markets]);
 
   useEffect(() => {
     const query = q.trim();
@@ -75,6 +116,18 @@ export function Watchlist(props: Props) {
         </div>
       </div>
       <div className="wl-scroll">
+        <section>
+          <h3>IG · MM</h3>
+          {igNote && <p className="wl-sub" style={{ padding: "6px 12px" }}>{igNote}</p>}
+          {igRows.map((row) => (
+            <button key={row.sub} className={`wl-row ${props.selectedId === row.id ? "active" : ""}`} type="button" onClick={() => { if (!row.id.includes(".")) props.onSelect(row.id); }}>
+              <span className="wl-name"><span>{row.name}</span><i className="flag exact">IG</i></span>
+              <span className="wl-sub">{row.sub}</span>
+              <span className="wl-px">{row.bid == null ? "n/a" : formatPrice(row.bid, 1)}</span>
+              <span className="wl-chg">{row.offer == null ? "" : formatPrice(row.offer, 1)}</span>
+            </button>
+          ))}
+        </section>
         {groups.map((group) => {
           const rows = group === "Custom"
             ? props.custom.map((c) => ({ id: `custom:${c.ticker}`, name: c.name, sub: c.ticker, removable: c.ticker, exactness: null as string | null, unavailable: false, reason: "" }))
