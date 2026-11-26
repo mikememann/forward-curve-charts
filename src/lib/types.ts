@@ -91,7 +91,30 @@ export interface OhlcResponse {
   iceContracts?: { marketId: number; strip: string; label: string; nearExpiry?: boolean }[];
   /** Strip actually plotted, e.g. "Dec26". */
   iceStrip?: string | null;
+  /** Where a monthly history hands over to a higher-frequency series. */
+  splice?: SpliceInfo | null;
   error?: string;
+}
+
+export interface SeriesMark {
+  time: number;
+  label: string;
+  kind: "splice" | "break";
+}
+
+export interface SpliceInfo {
+  time: number | null;
+  /** First recent close minus the last monthly close, divided by the monthly close. */
+  gap: number | null;
+  monthlyClose: number | null;
+  recentClose: number | null;
+  /** Member states in the latest week, e.g. "DK/PL/RO". */
+  states: string | null;
+  nativeLast: number | null;
+  nativeUnit: string;
+  usdLast: number | null;
+  legend: string;
+  marks: SeriesMark[];
 }
 
 export interface Quote {

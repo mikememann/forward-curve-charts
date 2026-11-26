@@ -42,7 +42,8 @@ export type SourceKind =
   | "elexon"
   | "portwatch"
   | "agsi"
-  | "ice";
+  | "ice"
+  | "splice";
 
 /**
  * ICE charting data is free to view for personal use.

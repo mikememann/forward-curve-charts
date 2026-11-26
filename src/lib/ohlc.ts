@@ -58,7 +58,10 @@ export async function loadOhlc(opts: {
   const market = opts.market === undefined ? findMarketByTicker(ticker) : opts.market;
   const want = clamp(opts.bars ?? defaultBars(timeframe), 20, 5000);
   const warnings: string[] = [];
-  if (timeframe === "1d" || timeframe === "1w") {
+  if (timeframe === "1d" || timeframe === "1w" || market?.sourceKind === "splice") {
+    if (market?.sourceKind === "splice" && (timeframe === "15m" || timeframe === "1h")) {
+      warnings.push("No intraday prints for this series. Showing the monthly steps and the later weekly or daily bars.");
+    }
     const built = await buildDailyHistory({
       market,
       ticker,
@@ -66,7 +69,7 @@ export async function loadOhlc(opts: {
       strip: opts.strip ?? null,
     });
     if (!built.bars.length) throw new DataError(`No daily bars for ${ticker || market?.name || "this market"}`, ticker);
-    const series = timeframe === "1w" ? bucket(built.bars, "1w") : built.bars;
+    const series = timeframe === "1w" && market?.sourceKind !== "splice" ? bucket(built.bars, "1w") : built.bars;
     const sma200Daily = lastSma(built.bars.map((b) => b.close), 200);
     if (sma200Daily == null) warnings.push(`200-day SMA unavailable: ${built.bars.length} daily bars (200 required).`);
     const enriched = enrich(series, { closeOnly: built.closeOnly });
@@ -87,7 +90,9 @@ export async function loadOhlc(opts: {
       units: built.units ?? undefined,
       priceSource: "free",
       contractLabel: built.contractLabel,
+      infoNote: built.infoNote ?? undefined,
     });
+    if (built.splice) body.splice = built.splice;
     if (built.iceContracts) {
       body.iceContracts = built.iceContracts;
       body.iceStrip = built.iceStrip;

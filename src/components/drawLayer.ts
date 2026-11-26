@@ -40,6 +40,7 @@ export interface DrawScene {
   bb: { time: number; upper: number; lower: number }[] | null;
   cloud: CloudSeg[] | null;
   divergences: { kind: "bull" | "bear"; time1: number; time2: number; price1: number; price2: number; label: string }[];
+  marks: { time: number; label: string; kind: "splice" | "break" }[];
   decimals: number;
 }
 
@@ -61,6 +62,14 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: DrawScene): vo
   ctx.beginPath();
   ctx.rect(0, 0, width, height);
   ctx.clip();
+
+  for (const mark of scene.marks) {
+    const x = scene.xOfTime(mark.time);
+    if (x == null) continue;
+    const color = mark.kind === "splice" ? "#ffb300" : "#90a4ae";
+    stroke(ctx, [{ x, y: 0 }, { x, y: height }], color, 1.2, [3, 3]);
+    tag(ctx, x + 4, 14, mark.label, color, "#111");
+  }
 
   if (scene.bb && scene.bb.length > 1) fillBand(ctx, scene, scene.bb.map((p) => ({ time: p.time, a: p.upper, b: p.lower })), "rgba(144,164,174,0.10)");
   if (scene.cloud) fillCloud(ctx, scene, scene.cloud);
