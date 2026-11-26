@@ -22,9 +22,45 @@ export interface IgAllowance {
   allowanceExpiry: number;
 }
 
+export interface IgPageData {
+  pageNumber?: number;
+  pageSize?: number;
+  totalPages?: number;
+}
+
 export interface IgPricesBody {
   prices?: IgPriceBar[];
-  metadata?: { allowance?: Partial<IgAllowance> };
+  metadata?: { allowance?: Partial<IgAllowance>; pageData?: IgPageData };
+}
+
+/**
+ * IG v3 pages prices. The default page size is 20 and page 1 is the oldest
+ * page, so max=N without pageSize=0 can omit the newest bars.
+ * pageSize=0 asks for the whole window in one response.
+ */
+export function priceQuery(resolution: string, max: number): URLSearchParams {
+  return new URLSearchParams({
+    resolution,
+    max: String(max),
+    pageSize: "0",
+  });
+}
+
+/** Page numbers still to fetch when page 1 is not the last page. */
+export function extraPageNumbers(page: IgPageData | undefined): number[] {
+  const total = page?.totalPages ?? 1;
+  const current = page?.pageNumber ?? 1;
+  if (!Number.isFinite(total) || !Number.isFinite(current) || total <= current) return [];
+  const out: number[] = [];
+  for (let n = current + 1; n <= total && out.length < 8; n++) out.push(n);
+  return out;
+}
+
+export function pageQuery(resolution: string, max: number, pageNumber: number, pageSize: number): URLSearchParams {
+  const params = priceQuery(resolution, max);
+  params.set("pageSize", String(pageSize > 0 ? pageSize : 20));
+  params.set("pageNumber", String(pageNumber));
+  return params;
 }
 
 /** Mid of bid and ask. Last traded is used only when one side of the quote is missing. */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { igMid, mergeBars, parseIgPrices } from "./igParse";
+import { extraPageNumbers, igMid, mergeBars, pageQuery, parseIgPrices, priceQuery } from "./igParse";
 
 test("OHLC is the mid of bid and ask", () => {
   assert.equal(igMid({ bid: 9047.5, ask: 9048.5, lastTraded: null }), 9048);
@@ -25,6 +25,43 @@ test("OHLC is the mid of bid and ask", () => {
   assert.equal(parsed.bars[0].close, 105);
   assert.equal(parsed.bars[0].time, Date.parse("2026-11-23T05:00:00Z") / 1000);
   assert.equal(parsed.allowance?.remainingAllowance, 9800);
+});
+
+function day(iso: string, close: number) {
+  return {
+    snapshotTimeUTC: `${iso}T00:00:00`,
+    openPrice: { bid: close, ask: close, lastTraded: null },
+    highPrice: { bid: close, ask: close, lastTraded: null },
+    lowPrice: { bid: close, ask: close, lastTraded: null },
+    closePrice: { bid: close, ask: close, lastTraded: null },
+    lastTradedVolume: 1,
+  };
+}
+
+test("a paged DAY history keeps the newest page, for MINUTE_15 and HOUR too", () => {
+  for (const resolution of ["DAY", "MINUTE_15", "HOUR"]) {
+    const query = priceQuery(resolution, 20);
+    assert.equal(query.get("pageSize"), "0");
+    assert.equal(query.get("max"), "20");
+    assert.equal(query.get("resolution"), resolution);
+  }
+  const older = Array.from({ length: 20 }, (_, i) => day(`2026-10-${String(i + 1).padStart(2, "0")}`, 100 + i));
+  const newer = ["2026-11-21", "2026-11-24", "2026-11-25", "2026-11-26"].map((iso, i) => day(iso, 200 + i));
+  const page1 = parseIgPrices({
+    prices: older,
+    metadata: { pageData: { pageNumber: 1, pageSize: 20, totalPages: 2 }, allowance: { remainingAllowance: 9000, totalAllowance: 10000, allowanceExpiry: 100 } },
+  });
+  assert.deepEqual(extraPageNumbers({ pageNumber: 1, pageSize: 20, totalPages: 2 }), [2]);
+  assert.deepEqual(extraPageNumbers({ pageNumber: 1, pageSize: 0, totalPages: 1 }), []);
+  const follow = pageQuery("DAY", 20, 2, 20);
+  assert.equal(follow.get("pageNumber"), "2");
+  assert.equal(follow.get("pageSize"), "20");
+  const page2 = parseIgPrices({ prices: newer, metadata: { pageData: { pageNumber: 2, pageSize: 20, totalPages: 2 } } });
+  const newest = mergeBars(page1.bars, page2.bars).slice(-20);
+  assert.equal(newest.length, 20);
+  assert.equal(newest.at(-1)?.time, Date.parse("2026-11-26T00:00:00Z") / 1000);
+  assert.ok(newest.every((bar, i) => i === 0 || bar.time > newest[i - 1].time));
+  assert.equal(page1.bars.at(-1)?.time, Date.parse("2026-10-20T00:00:00Z") / 1000);
 });
 
 test("merging bars replaces the same timestamp and keeps older history", () => {

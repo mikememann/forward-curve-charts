@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { igCall } from "@/lib/igAllow";
-import { mergeBars, parseIgPrices, type IgAllowance } from "@/lib/igParse";
+import { extraPageNumbers, mergeBars, pageQuery, parseIgPrices, priceQuery, type IgAllowance, type IgPageData, type IgPricesBody } from "@/lib/igParse";
 import type { Bar, Timeframe } from "@/lib/types";
 
 /**
@@ -147,25 +147,39 @@ export async function loadIgBars(epic: string, timeframe: "15m" | "1h" | "1d", w
     return { bars: bars.slice(-want), allowance };
   }
   let guard = 0;
-  let fetchedTail = false;
   while (bars.length < want && guard < 4) {
-    const ask = Math.min(CHUNK, Math.max(20, want - bars.length + 5));
-    const params = new URLSearchParams({ resolution, max: String(ask) });
-    if (fetchedTail && bars[0]) {
-      params.set("to", new Date((bars[0].time - 1) * 1000).toISOString().replace(/\.\d{3}Z$/, ""));
-    }
-    fetchedTail = true;
-    const res = await authed(`/prices/${encodeURIComponent(epic)}?${params}`, "3");
-    if (!res.ok) throw new Error(`IG prices failed (${res.status}) for ${epic}.`);
-    const parsed = parseIgPrices((await res.json()) as Parameters<typeof parseIgPrices>[0]);
-    if (parsed.allowance) allowance = parsed.allowance;
+    const ask = Math.min(CHUNK, Math.max(want, 20));
+    const got = await fetchPriceWindow(epic, resolution, ask);
+    if (got.allowance) allowance = got.allowance;
     const before = bars.length;
-    bars = mergeBars(bars, parsed.bars);
-    if (parsed.bars.length === 0 || bars.length === before || parsed.bars.length < ask) break;
+    bars = mergeBars(bars, got.bars);
+    if (got.bars.length === 0 || bars.length === before) break;
     guard += 1;
+    if (got.bars.length >= ask) break;
   }
   await writeBars(key, bars);
   return { bars: bars.slice(-want), allowance };
+}
+
+async function fetchPriceWindow(epic: string, resolution: string, max: number): Promise<{ bars: Bar[]; allowance: IgAllowance | null }> {
+  const first = await readPricePage(epic, priceQuery(resolution, max));
+  let bars = first.bars;
+  let pageAllowance = first.allowance;
+  const pageSize = first.page?.pageSize && first.page.pageSize > 0 ? first.page.pageSize : 20;
+  for (const pageNumber of extraPageNumbers(first.page)) {
+    const next = await readPricePage(epic, pageQuery(resolution, max, pageNumber, pageSize));
+    if (next.allowance) pageAllowance = next.allowance;
+    bars = mergeBars(bars, next.bars);
+  }
+  return { bars, allowance: pageAllowance };
+}
+
+async function readPricePage(epic: string, params: URLSearchParams): Promise<{ bars: Bar[]; allowance: IgAllowance | null; page: IgPageData | undefined }> {
+  const res = await authed(`/prices/${encodeURIComponent(epic)}?${params}`, "3");
+  if (!res.ok) throw new Error(`IG prices failed (${res.status}) for ${epic}.`);
+  const body = (await res.json()) as IgPricesBody;
+  const parsed = parseIgPrices(body);
+  return { bars: parsed.bars, allowance: parsed.allowance, page: body.metadata?.pageData };
 }
 
 export interface IgWatchlistMarket {
