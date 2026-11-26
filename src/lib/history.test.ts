@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { historyFromCache, inferScale, scaleBars, stitchByDay } from "./history";
+import { historyFromCache, inferScale, recentScale, scaleBars, stitchByDay } from "./history";
 import type { Bar } from "./types";
 
 function bar(day: string, close: number): Bar {
@@ -25,6 +25,10 @@ test("IG scale snaps to 100 or 10000 and rejects a moving ratio", () => {
   const drift = days(5, 12, (i) => (90 + i) * (100 + i * 5));
   assert.equal(inferScale(drift, free), null);
   assert.equal(inferScale(ig.slice(0, 4), free), null);
+  const drifted = days(5, 50, (i) => (i < 20 ? (90 + i) * 2 : 90 + i));
+  const flat = days(5, 50, (i) => 90 + i);
+  assert.equal(inferScale(drifted, flat), null);
+  assert.equal(recentScale(drifted, flat), 1);
 });
 
 test("stitch keeps the overlay on a shared day and accepts a parsed or string cache", () => {

@@ -6,6 +6,7 @@ import {
   historyFromCache,
   IG_TAIL_BARS,
   inferScale,
+  recentScale,
   scaleBars,
   stitchByDay,
   yearsBack,
@@ -69,7 +70,7 @@ export async function buildDailyHistory(opts: {
     );
   }
 
-  const key = `hist:1:${market?.id ?? opts.ticker}:${opts.strip || "front"}:${opts.ticker}:1d`;
+  const key = `hist:2:${market?.id ?? opts.ticker}:${opts.strip || "front"}:${opts.ticker}:1d`;
   const now = Math.floor(Date.now() / 1000);
   const cached = historyFromCache(await readStoredJson(key));
   let bars: Bar[];
@@ -205,7 +206,7 @@ async function maybeContinuous(
   try {
     const chart = await yahooChart(continuous, "1d", "10y");
     const older = bucket(chart.bars, "1d");
-    if (inferScale(bars, older) !== 1) {
+    if (recentScale(bars, older) !== 1) {
       warnings.push(`${continuous} was not joined: its prices do not match ${opts.ticker} on the overlap.`);
       return { bars, note: null };
     }
