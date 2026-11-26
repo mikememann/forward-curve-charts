@@ -56,9 +56,8 @@ export async function loadOhlc(opts: {
 }): Promise<OhlcResponse> {
   let { ticker, timeframe } = opts;
   const market = opts.market === undefined ? findMarketByTicker(ticker) : opts.market;
-  const want = market?.id === "dated-brent"
-    ? 12_000
-    : clamp(opts.bars ?? defaultBars(timeframe), 20, 5000);
+  const deepDaily = market?.id === "dated-brent" || market?.id === "uk-1y" || market?.ticker === "CPO=F" || market?.ticker === "DBA" || market?.ticker === "DBE";
+  const want = deepDaily ? 15_000 : clamp(opts.bars ?? defaultBars(timeframe), 20, 5000);
   const warnings: string[] = [];
   if (timeframe === "1d" || timeframe === "1w" || market?.sourceKind === "splice") {
     if (market?.sourceKind === "splice" && (timeframe === "15m" || timeframe === "1h")) {
