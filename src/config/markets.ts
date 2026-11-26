@@ -43,7 +43,9 @@ export type SourceKind =
   | "portwatch"
   | "agsi"
   | "ice"
-  | "splice";
+  | "splice"
+  | "euronext"
+  | "special";
 
 /**
  * ICE charting data is free to view for personal use.
@@ -101,6 +103,8 @@ export interface CurveConfig {
   note: string;
   /** How many listed months to request, starting at the front. */
   count?: number;
+  /** Euronext root when the curve is the live settlement board, not Yahoo. */
+  euronext?: "EBM" | "EMA";
   /**
    * Contract list for the curve when it differs from `contract`
    * (TTF has no single chart contract). minDaysToExpiry is ignored:

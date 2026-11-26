@@ -122,6 +122,43 @@ async function fetchHost(host: string, symbol: string, interval: string, range: 
   }
 }
 
+/** Daily bars between two unix seconds. Avoids range=max, which Yahoo returns as monthly bars for some futures. */
+export async function yahooDaily(symbol: string, period1: number, period2 = Math.floor(Date.now() / 1000) + 86_400): Promise<YahooChart> {
+  const key = `${symbol}|1d|${period1}|${period2}`;
+  const hit = cache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.value;
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const job = (async () => {
+    let last: unknown;
+    for (const host of ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]) {
+      try {
+        const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d&includePrePost=false`;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 20_000);
+        try {
+          const res = await fetch(url, {
+            signal: ctrl.signal,
+            headers: { "User-Agent": "MMCharts/1.0", Accept: "application/json" },
+            cache: "no-store",
+          });
+          if (!res.ok) throw new YahooError(`Yahoo Finance HTTP ${res.status}`, symbol);
+          const value = parseYahooChart(symbol, await res.json());
+          cache.set(key, { expires: Date.now() + ttlFor("1d"), value });
+          return value;
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (e) {
+        last = e;
+      }
+    }
+    throw last instanceof Error ? last : new YahooError("Yahoo Finance request failed", symbol);
+  })().finally(() => inflight.delete(key));
+  inflight.set(key, job);
+  return job;
+}
+
 export async function yahooChart(symbol: string, interval: string, range: string): Promise<YahooChart> {
   const key = `${symbol}|${interval}|${range}`;
   const hit = cache.get(key);

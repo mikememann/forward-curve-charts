@@ -17,6 +17,8 @@ export interface CurveDef {
   spec: NonNullable<Market["contract"]> | null;
   /** ICE charting curve. `spec` is null and loadCurve is not used. */
   ice: boolean;
+  /** Euronext commodity root, when this curve is not a Yahoo chain. */
+  euronext: "EBM" | "EMA" | null;
   marketId: string | null;
 }
 
@@ -73,6 +75,22 @@ export function allCurves(): CurveDef[] {
         count: m.curve.count ?? 12,
         spec: null,
         ice: true,
+        euronext: null,
+        marketId: m.id,
+      });
+      continue;
+    }
+    if (m.curve.euronext) {
+      fromMarkets.push({
+        id: m.id,
+        name: m.name,
+        units: m.units,
+        decimals: m.decimals ?? 2,
+        note: m.curve.note,
+        count: m.curve.count ?? 12,
+        spec: null,
+        ice: false,
+        euronext: m.curve.euronext,
         marketId: m.id,
       });
       continue;
@@ -88,6 +106,7 @@ export function allCurves(): CurveDef[] {
       count: m.curve.count ?? 12,
       spec,
       ice: false,
+      euronext: null,
       marketId: m.id,
     });
   }
@@ -100,6 +119,7 @@ export function allCurves(): CurveDef[] {
     count: c.count ?? 12,
     spec: c.spec,
     ice: false,
+    euronext: null,
     marketId: null,
   }));
   return [...fromMarkets, ...extras];

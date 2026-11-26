@@ -2,6 +2,8 @@ import "server-only";
 import { DataError } from "@/lib/errors";
 import { quote as iceFrontQuote } from "@/lib/ice";
 import { resolveContract } from "@/lib/contracts";
+import { loadEuronextContinuous } from "@/lib/euronext";
+import { loadExtra } from "@/lib/extraSeries";
 import { loadSplice } from "@/lib/spliceSeries";
 import { loadExternal } from "@/lib/sources";
 import { bucketBars } from "@/lib/bucket";
@@ -74,6 +76,21 @@ async function quoteForCustom(ticker: string): Promise<Quote> {
   }
 }
 
+function lastQuote(view: MarketView, source: string, bars: { time: number; close: number }[], basis: string): Quote {
+  const lastBar = bars.at(-1);
+  const prev = bars.at(-2);
+  const base = shell(view, source);
+  base.last = lastBar?.close ?? null;
+  base.asOfUnix = lastBar?.time ?? null;
+  base.lastUpdatedLabel = lastBar ? formatLondon(lastBar.time, "date") : null;
+  if (lastBar && prev && prev.close !== 0) {
+    base.change = lastBar.close - prev.close;
+    base.changePct = (base.change / Math.abs(prev.close)) * 100;
+    base.changeBasis = basis;
+  }
+  return base;
+}
+
 async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
   if (view.requiresEnv && !process.env[view.requiresEnv]) {
     return blank(view, `Off until ${view.requiresEnv} is set. No figure is shown without it.`);
@@ -93,6 +110,22 @@ async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
       quote.changeBasis = quote.changeBasis ? `${quote.changeBasis} · stand-in` : "stand-in";
       if (!quote.last) quote.error = `ICE did not load (${message}).`;
       return quote;
+    }
+  }
+  if (view.sourceKind === "euronext" && (view.seriesId === "EBM" || view.seriesId === "EMA")) {
+    try {
+      const loaded = await loadEuronextContinuous(view.seriesId);
+      return lastQuote(view, `Euronext ${view.seriesId}`, loaded.bars, "previous session");
+    } catch (e) {
+      return blank(view, e instanceof Error ? e.message : "Couldn't load");
+    }
+  }
+  if (view.sourceKind === "special" && view.seriesId) {
+    try {
+      const loaded = await loadExtra(view.seriesId);
+      return lastQuote(view, loaded.label, loaded.bars, "previous observation");
+    } catch (e) {
+      return blank(view, e instanceof Error ? e.message : "Couldn't load");
     }
   }
   if (view.sourceKind === "splice" && view.seriesId) {

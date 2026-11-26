@@ -95,7 +95,8 @@ async function loadNative(source: SourceKind, seriesId: string, name: string): P
 }
 
 async function loadFred(id: string): Promise<{ bars: Bar[]; instrumentName: string | null }> {
-  const csv = await text(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}`);
+  // A browser User-Agent makes fredgraph.csv hang. Use a plain client name.
+  const csv = await text(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}`, { "User-Agent": "MMCharts/1.0" });
   const bars = parseFredCsv(csv);
   if (!bars.length) throw new DataError(`FRED returned no observations for ${id}`, id);
   return { bars, instrumentName: id };
@@ -156,7 +157,10 @@ async function loadWorldBank(column: string): Promise<{ bars: Bar[]; instrumentN
   const rows = xlsx.utils.sheet_to_json<(string | number | null)[]>(sheet, { header: 1, raw: false });
   const header = rows[4] ?? [];
   const units = rows[5] ?? [];
-  const col = header.findIndex((cell) => String(cell ?? "").trim() === column);
+  const col = header.findIndex((cell) => {
+    const name = String(cell ?? "").trim();
+    return name === column || name.startsWith(`${column} `) || name.startsWith(`${column}*`);
+  });
   if (col < 0) throw new DataError(`World Bank Pink Sheet has no '${column}' column in this file`, column);
   const bars: Bar[] = [];
   for (const row of rows.slice(6)) {
