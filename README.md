@@ -81,13 +81,25 @@ The layout and each pane’s settings are saved in `localStorage` (`mm-charts:la
 | Rule | Behaviour |
 |---|---|
 | Futures contracts | The chart opens on the resolved month and prints the contract name (`Feb 2027`, `BZG27.NYM`). **Continuous** switches to the Yahoo `=F` series and says it is back-adjusted. |
-| Proxies | An amber banner stays on screen. GBP/USD is spot, not the Dec-26 forward and not ×10,000. Gold `GC=F` is COMEX continuous, not a spot fix. Cocoa is NY USD/t, not London GBP/t. Sugar is No.11 USc/lb, not London No.5. |
+| Proxies | An amber banner stays on screen. GBP/USD is spot, not the Dec-26 forward and not ×10,000. Gold `GC=F` is COMEX continuous, not a spot fix. London cocoa, white sugar, robusta and UK feed wheat come from ICE. If that request fails, cocoa, sugar and robusta fall back to the old stand-in and say so. UK wheat does not fall back to Chicago wheat. |
 | FX day change | Versus the **22:00 Europe/London** print (close of the 21:00–22:00 hour), not Yahoo’s official daily close. If that bar is missing, the change is `n/a`. |
 | TTF | If the last bar is more than one London business day behind, the price is **n/a** and the last-updated date is shown. History can still be charted, labelled as history. |
 | LSE stocks | BP and Tesco stay in pence (`p` / `GBp`). They are not divided by 100. FTSE 100 is index points. |
 | Failures | A failed fetch is an error state. No number is invented to fill a gap. Forward-curve months Yahoo does not quote are gaps; the line is not bridged. |
 | Delay | Every chart shows **Yahoo Finance**, the delay note (futures are typically 10–30 minutes), the last bar in UK time, and the age of the quote timestamp. |
 | Units | Yahoo’s native units. Not IG points. |
+
+## ICE London softs
+
+London cocoa, white sugar No.5, robusta coffee and UK feed wheat use ICE's charting JSON. These routes are **undocumented and may change**. The server sends a browser User-Agent. If a request fails, the chart says so. Cocoa, sugar and robusta then show the old stand-in, labelled. UK feed wheat does not fall back to Chicago wheat.
+
+ICE data is **free to view for personal use and not for redistribution**. The same note is in `src/lib/ice.ts`.
+
+`contract-data?productId=&hubId=` builds the contract picker and the forward curve. Saved market ids are used only when that list does not answer. **Front** skips a contract whose delivery month starts within 14 days. On 25 Nov 2026 that rolls cocoa off Dec26 (`8012782`, expiring) onto Mar27 (`8174255`). The curve still lists the expiring month.
+
+Daily history uses `historicalSpan` 1 (about 3 months), 2 (about a year) or 3 (the longest series). It stops at the previous session, so the chart appends today's last 10-minute price. Intraday is today's 10-minute closes. Each fetch is appended to a file (`ICE_CACHE_DIR`, or the temp directory) so a long-running server accumulates intraday history. On Vercel that file lasts for the life of the instance.
+
+The series is close-based. Hourly candles take the high and low from those 10-minute closes, which understates the traded range. Stochastic and ATR still run, with that warning on the chart. **15m** shows the 10-minute closes, because ICE does not publish 15-minute bars. NY cocoa (CC), sugar No.11 (SB) and Coffee C (KC) can be overlaid as Yahoo true OHLC. They are different contracts. Nothing is multiplied by GBPUSD. UK feed wheat intraday is often sparse, and the chart says when it is.
 
 ## LSEG Workspace layout
 
@@ -97,7 +109,8 @@ Rows that are view-only, proprietary, or unclear are listed in the same groups a
 
 | Source | What it feeds | Licence |
 |---|---|---|
-| Yahoo Finance | Futures, FX, equities, GSCI, NBP, palm oil, CBOT urea | Free to view, personal use, no redistribution |
+| Yahoo Finance | Futures, FX, equities, GSCI, NBP, palm oil, CBOT urea, NY cocoa and sugar No.11 | Free to view, personal use, no redistribution |
+| ICE charting | London cocoa (GBP/t), white sugar No.5 (USD/t), robusta (USD/t), UK feed wheat (GBP/t) | Free to view, personal use, **not for redistribution** |
 | FRED | EIA Brent spot, IMF monthly oils, policy rates, US yields, PPI | Public domain |
 | Bank of England IADB | Bank Rate, 5y and 10y gilt par yields | Free reuse with attribution |
 | Deutsche Bundesbank BBSIS | German 1y / 5y / 10y curve yields | Free reuse with attribution |

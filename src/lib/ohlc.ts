@@ -3,6 +3,8 @@ import { DataError } from "@/lib/errors";
 import { loadExternal } from "@/lib/sources";
 import { delayNoteFor, findMarketByTicker, type MarketView } from "@/lib/marketModel";
 import { bucketBars } from "@/lib/bucket";
+import { resolveContract } from "@/lib/contracts";
+import { loadIceSeries } from "@/lib/ice";
 import { enrich, lastSma } from "@/lib/indicators";
 import { formatLondon, isStaleQuote } from "@/lib/time";
 import type { OhlcResponse, Timeframe } from "@/lib/types";
@@ -42,11 +44,29 @@ export async function loadOhlc(opts: {
   timeframe: Timeframe;
   bars?: number;
   market?: MarketView | null;
+  /** ICE delivery strip, e.g. "Dec26" or "Dec 2026". Empty uses the front contract. */
+  strip?: string | null;
 }): Promise<OhlcResponse> {
   let { ticker, timeframe } = opts;
   const market = opts.market === undefined ? findMarketByTicker(ticker) : opts.market;
   const want = clamp(opts.bars ?? defaultBars(timeframe), 20, 5000);
   const warnings: string[] = [];
+  if (market?.sourceKind === "ice" && market.ice) {
+    try {
+      return await loadIceOhlc(market, timeframe, want, opts.strip ?? null);
+    } catch (e) {
+      if (!market.iceFallback) throw e instanceof DataError ? e : new DataError(e instanceof Error ? e.message : "ICE request failed", market.id);
+      const message = e instanceof Error ? e.message : "ICE request failed";
+      const standIn = fallbackView(market);
+      const body = await loadOhlc({ ticker: standIn.ticker, timeframe, bars: want, market: standIn });
+      body.warnings = [`ICE charting did not load (${message}). These endpoints are undocumented and may have changed. Showing the old stand-in.`, ...body.warnings];
+      body.proxyNote = standIn.proxyNote;
+      body.exactness = "proxy";
+      body.infoNote = standIn.infoNote;
+      body.units = standIn.units;
+      return body;
+    }
+  }
   if (market?.intradayOnly && (timeframe === "1d" || timeframe === "1w")) {
     throw new DataError(
       `${market.name} has no daily history on Yahoo (only a few days of intraday bars). Open 15m or 1h. Nothing has been backfilled.`,
@@ -133,6 +153,79 @@ export async function loadOhlc(opts: {
   return pack(sliced, chart.meta, { ticker, timeframe, market, sma200Daily, warnings, quoteTime: chart.meta.regularMarketTime });
 }
 
+async function loadIceOhlc(market: MarketView, timeframe: Timeframe, want: number, strip: string | null): Promise<OhlcResponse> {
+  const loaded = await loadIceSeries(market.ice!, timeframe, strip);
+  const warnings = [...loaded.warnings];
+  const enriched = enrich(loaded.bars, { closeOnly: loaded.closeOnly });
+  const dailyCloses = loaded.dailyCloses.map((b) => b.close);
+  const sma200Daily = lastSma(dailyCloses, 200);
+  if (sma200Daily == null) warnings.push(`200-day SMA unavailable: ${dailyCloses.length} daily closes (200 required).`);
+  if (timeframe !== "1d" && enriched.length && enriched[enriched.length - 1].sma200 == null) {
+    warnings.push(`SMA200 of this timeframe is n/a: fewer than 200 ${timeframe} bars were available.`);
+  }
+  const currency = market.units.startsWith("GBP") ? "GBP" : market.units.startsWith("USD") ? "USD" : null;
+  const body = pack(enriched.slice(-want), {
+    currency,
+    shortName: `${loaded.contract.label} · ${loaded.contract.marketId}`,
+    exchangeName: "ICE Futures Europe",
+    instrumentType: "FUTURE",
+    regularMarketPrice: loaded.contract.lastPrice,
+  }, {
+    ticker: market.ticker,
+    timeframe,
+    market,
+    sma200Daily,
+    warnings,
+    quoteTime: loaded.quoteTime,
+    sourceLabel: "ICE",
+    contractLabel: loaded.contract.label,
+  });
+  body.iceContracts = loaded.contracts.map((c) => ({ marketId: c.marketId, strip: c.strip, label: c.label, nearExpiry: c.nearExpiry }));
+  body.iceStrip = loaded.rolled ? "front" : loaded.contract.strip;
+  return body;
+}
+
+function fallbackView(market: MarketView): MarketView {
+  const fb = market.iceFallback;
+  if (!fb) return market;
+  if (fb.kind === "yahoo") {
+    const contract = resolveContract(fb.contract);
+    return {
+      ...market,
+      sourceKind: "yahoo",
+      ice: null,
+      iceFallback: null,
+      units: fb.units,
+      ticker: contract.ticker,
+      contractTicker: contract.ticker,
+      contractLabel: contract.label,
+      contract,
+      continuous: null,
+      proxyNote: fb.note,
+      infoNote: fb.note,
+      exactness: "proxy",
+      licence: "Yahoo terms: free to view, personal use, no redistribution",
+      attribution: "Yahoo Finance",
+    };
+  }
+  return {
+    ...market,
+    sourceKind: "fred",
+    ice: null,
+    iceFallback: null,
+    units: fb.units,
+    ticker: fb.seriesId,
+    seriesId: fb.seriesId,
+    nativeFrequency: fb.nativeFrequency,
+    proxyNote: fb.note,
+    infoNote: fb.note,
+    exactness: "proxy",
+    licence: "Public domain (FRED / source agency)",
+    attribution: "FRED, IMF primary commodity prices",
+    delayNote: "Monthly IMF average.",
+  };
+}
+
 function pack(
   bars: OhlcResponse["bars"],
   meta: { currency: string | null; shortName: string | null; exchangeName: string | null; instrumentType: string | null; regularMarketPrice: number | null },
@@ -144,6 +237,7 @@ function pack(
     warnings: string[];
     quoteTime: number | null;
     sourceLabel?: string;
+    contractLabel?: string | null;
   },
 ): OhlcResponse {
   const last = bars[bars.length - 1];
@@ -174,7 +268,7 @@ function pack(
     pence: Boolean(ctx.market?.pence),
     instrumentName: meta.shortName,
     exchange: meta.exchangeName,
-    contractLabel: continuous ? null : ctx.market?.contractLabel ?? null,
+    contractLabel: continuous ? null : ctx.contractLabel ?? ctx.market?.contractLabel ?? null,
     continuous,
     proxyNote: ctx.market?.proxyNote ?? null,
     infoNote: ctx.market?.infoNote ?? null,

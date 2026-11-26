@@ -114,13 +114,15 @@ function ChartPaneInner(props: Props, ref: ForwardedRef<PaneHandle>) {
     setError(null);
     setPayload(null);
     setHover(null);
-    const url = spread
-      ? `/api/ohlc?${new URLSearchParams({ formula: spread.formula, timeframe: settings.timeframe })}`
-      : `/api/ohlc?${new URLSearchParams({
+    const params = spread
+      ? new URLSearchParams({ formula: spread.formula, timeframe: settings.timeframe })
+      : new URLSearchParams({
           ticker,
           timeframe: settings.timeframe,
           market: viewModel && !viewModel.id.startsWith("custom:") ? viewModel.id : "",
-        })}`;
+        });
+    if (!spread && viewModel?.sourceKind === "ice") params.set("strip", settings.strip || "front");
+    const url = `/api/ohlc?${params}`;
     fetchOhlc(url)
       .then((body) => {
         if (!live) return;
@@ -137,7 +139,7 @@ function ChartPaneInner(props: Props, ref: ForwardedRef<PaneHandle>) {
     return () => {
       live = false;
     };
-  }, [unavailable, spread, ticker, settings.timeframe, viewModel?.id, retry]);
+  }, [unavailable, spread, ticker, settings.timeframe, settings.strip, viewModel?.id, viewModel?.sourceKind, retry]);
 
   const curveKey = settings.view === "curve" ? (viewModel?.curveId ?? settings.marketId) : null;
   useEffect(() => {

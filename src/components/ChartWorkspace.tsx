@@ -97,20 +97,26 @@ export function ChartWorkspace() {
     const savedCustom = readJson<CustomSymbol[]>("mm-charts:custom:v1") ?? [];
     setCustom(savedCustom);
     setSpreads(readJson<{ id: string; name: string; formula: string }[]>("mm-charts:spreads:v1") ?? []);
+    const url = new URLSearchParams(window.location.search);
     const fromUrl = decodeLayout(window.location.search);
-    if (fromUrl) setDesk(fromUrl);
-    else if (savedLayout && savedLayout.panes?.length && savedLayout.panes.every((p) => p && p.marketId && p.show)) setDesk(savedLayout);
-    else {
-      const url = new URLSearchParams(window.location.search);
+    const strip = url.get("strip");
+    if (fromUrl) {
+      if (strip && fromUrl.panes[fromUrl.active]) fromUrl.panes[fromUrl.active].strip = strip;
+      setDesk(fromUrl);
+    } else if (savedLayout && savedLayout.panes?.length && savedLayout.panes.every((p) => p && p.marketId && p.show)) {
+      setDesk({ ...savedLayout, panes: savedLayout.panes.map((p) => ({ ...p, strip: p.strip || "front" })) });
+    } else {
       const tf = url.get("tf");
       const id = url.get("m") || prefs?.marketId || "brent";
       const base = singleLayout(id, tf === "15m" || tf === "1h" || tf === "1d" || tf === "1w" ? tf : prefs?.timeframe || "1h");
-      if (prefs?.chartType) base.panes[0].chartType = prefs.chartType;
+      const picked = presentMarkets().find((m) => m.id === id);
+      if (picked?.sourceKind === "ice") base.panes[0].chartType = "line";
+      else if (prefs?.chartType) base.panes[0].chartType = prefs.chartType;
       if (prefs?.logScale) base.panes[0].logScale = true;
       if (prefs?.show) base.panes[0].show = { ...DEFAULT_TOGGLES, ...prefs.show };
       if (url.get("view") === "curve") base.panes[0].view = "curve";
-      const picked = presentMarkets().find((m) => m.id === id);
       if (picked?.preferContinuous) base.panes[0].seriesMode = "continuous";
+      if (strip) base.panes[0].strip = strip;
       setDesk(base);
     }
     setHydrated(true);
@@ -244,6 +250,8 @@ export function ChartWorkspace() {
       seriesMode: m?.preferContinuous ? "continuous" : "contract",
       timeframe: m?.intradayOnly && (p.timeframe === "1d" || p.timeframe === "1w") ? "1h" : p.timeframe,
       view: p.view === "curve" && m && !m.curveId ? "chart" : p.view,
+      strip: "front",
+      chartType: m?.sourceKind === "ice" ? "line" : p.chartType,
     }), true);
   }
 
@@ -254,7 +262,13 @@ export function ChartWorkspace() {
   const bar = hover ?? payload?.bars[payload.bars.length - 1] ?? null;
   const decimals = quote?.decimals ?? (payload?.pence ? 2 : 2);
   const shownTicker = spread?.formula || ticker;
-  const showingThis = !unavailable && payload != null && payload.ticker === shownTicker;
+  const showingThis = !unavailable && payload != null && (
+    (payload.marketId != null && payload.marketId === (spread?.id ?? viewModel?.id))
+    || payload.ticker === shownTicker
+  );
+  const monthLabel = showingThis && payload?.contractLabel
+    ? payload.contractLabel
+    : seriesMode === "contract" ? viewModel?.contractLabel : null;
   const headerPrice = unavailable ? null : quote?.stale || payload?.stale ? null : quote?.last ?? (showingThis ? payload?.lastPrice ?? null : null);
   const trade = drawings.find((d): d is TradeDrawing => d.type === "trade");
 
@@ -300,7 +314,7 @@ export function ChartWorkspace() {
           <div className="title-block">
             <h1>
               {unavailable?.name ?? spread?.name ?? viewModel?.name ?? "Chart"}
-              {seriesMode === "contract" && viewModel?.contractLabel ? <span> · {viewModel.contractLabel}</span> : null}
+              {monthLabel ? <span> · {monthLabel}</span> : null}
               {seriesMode === "continuous" ? <span> · continuous</span> : null}
             </h1>
             <p className="ticker-line">
@@ -334,6 +348,30 @@ export function ChartWorkspace() {
             ))}
           </div>
           <button className={`toggle ${logScale ? "on" : ""}`} type="button" onClick={() => setLogScale((v) => !v)}>Log</button>
+          {payload?.iceContracts && payload.iceContracts.length > 0 && showingThis && (
+            <label className="compare">
+              Contract
+              <select value={pane.strip || payload.iceStrip || "front"} onChange={(e) => { updateActive({ strip: e.target.value, view: "chart" }); }}>
+                <option value="front">Front</option>
+                {payload.iceContracts.map((c) => (
+                  <option key={c.marketId} value={c.strip}>{c.label}{c.nearExpiry ? " · expiring" : ""}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {viewModel?.ice?.compareMarketId && (
+            <button
+              className={`toggle ${compareIds.includes(viewModel.ice.compareMarketId) ? "on" : ""}`}
+              type="button"
+              title="Yahoo true OHLC, rebased to the start of the window. Different contract and units."
+              onClick={() => {
+                const id = viewModel.ice?.compareMarketId;
+                if (!id) return;
+                setCompareIds((xs) => xs.includes(id) ? xs.filter((x) => x !== id) : xs.length >= 3 ? xs : [...xs, id]);
+                setView("chart");
+              }}
+            >{viewModel.ice.compareLabel ?? "Compare OHLC"}</button>
+          )}
           {viewModel?.continuous && viewModel.contractTicker && (
             <div className="seg">
               <button className={seriesMode === "contract" ? "on" : ""} type="button" onClick={() => setSeriesMode("contract")}>{viewModel.contractLabel}</button>
@@ -437,8 +475,10 @@ export function ChartWorkspace() {
                   {viewModel.attribution ? ` · ${viewModel.attribution}` : ""}
                 </p>
               )}
-              {viewModel?.infoNote && <p className="banner">{viewModel.infoNote}</p>}
+              {(payload?.infoNote || viewModel?.infoNote) && <p className="banner">{showingThis && payload?.infoNote ? payload.infoNote : viewModel?.infoNote}</p>}
               {viewModel?.proxyNote && <p className="banner warn"><b>Proxy.</b> {viewModel.proxyNote}</p>}
+              {showingThis && payload?.proxyNote && payload.proxyNote !== viewModel?.proxyNote && <p className="banner warn"><b>Stand-in.</b> {payload.proxyNote}</p>}
+              {showingThis && payload?.warnings.map((w) => <p key={w} className="banner warn">{w}</p>)}
               {spread && payload?.infoNote && <p className="banner">{payload.infoNote}</p>}
               {seriesMode === "continuous" && <p className="banner warn"><b>Back-adjusted continuous {ticker}.</b> Yahoo splices the rolls, so levels and percentage changes will not match the specific contract.</p>}
               {viewModel?.pence && <p className="banner">Quoted in pence (p), not pounds.</p>}
@@ -545,7 +585,11 @@ export function ChartWorkspace() {
             {bigCurve && bigCurve.id === curveId && <CurveView data={bigCurve} />}
           </div>
         )}
-        <footer className="foot">Public Yahoo Finance data, delayed. Not IG, not a point conversion, not advice.</footer>
+        <footer className="foot">
+          {showingThis && payload?.source === "ICE"
+            ? "ICE charting data is delayed, free to view for personal use, and not for redistribution. Not IG, not advice."
+            : "Public Yahoo Finance data, delayed. Not IG, not a point conversion, not advice."}
+        </footer>
       </main>
     </div>
   );
@@ -700,6 +744,8 @@ function customView(c: CustomSymbol | undefined): MarketView | null {
     nativeFrequency: null,
     requiresEnv: null,
     delayNote: null,
+    ice: null,
+    iceFallback: null,
   };
 }
 

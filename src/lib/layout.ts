@@ -11,6 +11,8 @@ export interface PaneSettings {
   logScale: boolean;
   show: IndicatorToggles;
   view: "chart" | "curve";
+  /** ICE delivery strip. "front" rolls past a month that is near expiry. */
+  strip: string;
 }
 
 export interface DeskLayout {
@@ -46,6 +48,7 @@ export function paneSettings(marketId: string, timeframe: Timeframe = "1d", seri
     logScale: false,
     show: { ...DEFAULT_TOGGLES },
     view: "chart",
+    strip: "front",
   };
 }
 
@@ -124,11 +127,11 @@ function encodePane(p: PaneSettings): string {
   const mode = p.seriesMode === "continuous" ? "x" : "c";
   const view = p.view === "curve" ? "v" : "h";
   const type = p.chartType === "line" ? "l" : p.chartType === "ohlc" ? "o" : "k";
-  return [p.marketId, p.timeframe, mode, view, type, p.logScale ? "1" : "0", maskOf(p.show)].join(".");
+  return [p.marketId, p.timeframe, mode, view, type, p.logScale ? "1" : "0", maskOf(p.show), p.strip || "front"].join(".");
 }
 
 function decodePane(raw: string): PaneSettings | null {
-  const [marketId, tf, mode, view, type, log, mask] = raw.split(".");
+  const [marketId, tf, mode, view, type, log, mask, strip] = raw.split(".");
   if (!marketId || !TF.has(tf as Timeframe)) return null;
   return {
     marketId,
@@ -138,6 +141,7 @@ function decodePane(raw: string): PaneSettings | null {
     chartType: type === "l" ? "line" : type === "o" ? "ohlc" : "candle",
     logScale: log === "1",
     show: mask ? showOf(mask) : { ...DEFAULT_TOGGLES },
+    strip: strip || "front",
   };
 }
 
@@ -154,6 +158,7 @@ export function encodeLayout(desk: DeskLayout): string {
     params.set("m", active.marketId);
     params.set("tf", active.timeframe);
     if (active.view === "curve") params.set("view", "curve");
+    if (active.strip) params.set("strip", active.strip);
   }
   return params.toString();
 }

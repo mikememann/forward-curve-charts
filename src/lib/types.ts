@@ -71,6 +71,10 @@ export interface OhlcResponse {
   sma200Daily: number | null;
   warnings: string[];
   bars: EnrichedBar[];
+  /** ICE delivery months, when this chart is an ICE contract. */
+  iceContracts?: { marketId: number; strip: string; label: string; nearExpiry?: boolean }[];
+  /** Strip actually plotted, e.g. "Dec26". */
+  iceStrip?: string | null;
   error?: string;
 }
 
@@ -128,7 +132,7 @@ export interface CurveResponse {
   name: string;
   units: string;
   decimals: number;
-  source: "Yahoo Finance";
+  source: string;
   delayNote: string;
   fetchedAt: string;
   note: string;
