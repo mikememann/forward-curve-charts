@@ -51,6 +51,12 @@ interface Props {
   onSelect: (id: string | null) => void;
   onHover: (bar: EnrichedBar | null) => void;
   onStatus: (message: string | null) => void;
+  /** When set, move this chart's crosshair to the nearest bar. */
+  syncTime?: number | null;
+  /** When set, show the same time window as the pane that was panned. */
+  syncRange?: { from: number; to: number } | null;
+  onSyncTime?: (time: number | null) => void;
+  onSyncRange?: (range: { from: number; to: number }) => void;
 }
 
 export function PriceChart(props: Props) {
@@ -65,6 +71,7 @@ export function PriceChart(props: Props) {
   const draftRef = useRef<Point[]>([]);
   const cursorRef = useRef<Point | null>(null);
   const keyRef = useRef<string | null>(null);
+  const echoRef = useRef(false);
   const [chartReady, setChartReady] = useState(0);
 
   useEffect(() => {
@@ -96,8 +103,15 @@ export function PriceChart(props: Props) {
     setChartReady((n) => n + 1);
 
     const redraw = () => paint(chart);
-    const onRange = () => redraw();
+    const onRange = () => {
+      redraw();
+      if (echoRef.current) return;
+      const range = chart.timeScale().getVisibleRange();
+      if (!range || typeof range.from !== "number" || typeof range.to !== "number") return;
+      propsRef.current.onSyncRange?.({ from: range.from, to: range.to });
+    };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
+    chart.timeScale().subscribeVisibleTimeRangeChange(onRange);
     const onClick = (param: MouseEventParams) => handleClick(param);
     const onMove = (param: MouseEventParams) => handleMove(param);
     chart.subscribeClick(onClick);
@@ -105,6 +119,7 @@ export function PriceChart(props: Props) {
 
     return () => {
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange);
+      chart.timeScale().unsubscribeVisibleTimeRangeChange(onRange);
       chart.unsubscribeClick(onClick);
       chart.unsubscribeCrosshairMove(onMove);
       chart.remove();
@@ -361,11 +376,62 @@ export function PriceChart(props: Props) {
     renderScene(ctx, scene);
   }
 
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !props.syncRange) return;
+    const current = chart.timeScale().getVisibleRange();
+    if (
+      current &&
+      typeof current.from === "number" &&
+      typeof current.to === "number" &&
+      Math.abs(current.from - props.syncRange.from) < 1 &&
+      Math.abs(current.to - props.syncRange.to) < 1
+    ) {
+      return;
+    }
+    echoRef.current = true;
+    try {
+      chart.timeScale().setVisibleRange({
+        from: props.syncRange.from as UTCTimestamp,
+        to: props.syncRange.to as UTCTimestamp,
+      });
+    } catch {
+      echoRef.current = false;
+      return;
+    }
+    requestAnimationFrame(() => {
+      echoRef.current = false;
+    });
+  }, [props.syncRange, chartReady]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+    if (props.syncTime == null) return;
+    const bars = barsRef.current;
+    let best: EnrichedBar | null = null;
+    let dist = Infinity;
+    for (const bar of bars) {
+      const d = Math.abs(bar.time - props.syncTime);
+      if (d < dist) {
+        dist = d;
+        best = bar;
+      }
+    }
+    if (!best || dist > 3 * 86_400) return;
+    echoRef.current = true;
+    chart.setCrosshairPosition(best.close, best.time as UTCTimestamp, series);
+    requestAnimationFrame(() => {
+      echoRef.current = false;
+    });
+  }, [props.syncTime, chartReady]);
+
   function handleMove(param: MouseEventParams) {
     const chart = chartRef.current;
     const series = seriesRef.current;
     const bars = barsRef.current;
-    if (!chart || !series) return;
+    if (!chart || !series || echoRef.current) return;
     if (param.paneIndex != null && param.paneIndex !== 0) {
       cursorRef.current = null;
       return;
@@ -374,8 +440,13 @@ export function PriceChart(props: Props) {
     cursorRef.current = point;
     if (typeof param.logical === "number") {
       const i = Math.round(param.logical);
-      propsRef.current.onHover(i >= 0 && i < bars.length ? bars[i] : null);
-    } else propsRef.current.onHover(null);
+      const bar = i >= 0 && i < bars.length ? bars[i] : null;
+      propsRef.current.onHover(bar);
+      propsRef.current.onSyncTime?.(bar ? bar.time : null);
+    } else {
+      propsRef.current.onHover(null);
+      propsRef.current.onSyncTime?.(null);
+    }
     if (draftRef.current.length) paint(chart);
   }
 

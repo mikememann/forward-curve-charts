@@ -66,6 +66,16 @@ The sidebar search adds a Yahoo symbol for this browser only (`localStorage`). I
 - Drawings, stored per symbol in `localStorage`: horizontal levels, trendlines (extended right), Fibonacci (0% on the second click; **Auto Fib** uses the same swing rule as the analyst’s chart script), Andrews pitchfork from three clicks or **Auto fork**, one or two anchored VWAPs (needs volume). **Trade** draws entry, stop, T1, T2 with R/R from the midpoint of the entry, and a stop distance in ATRs. **Context** draws the levels with no long/short label.
 - **Compare** overlays up to three watchlist symbols, each rebased to 0% at the start of the loaded window (dashed line is the charted symbol).
 
+## Several charts at once
+
+The toolbar layout control is **1**, **2** (side by side), **4** (2×2) or **6** (3×2). Click a pane to make it active: it gets an amber border, and the watchlist and the rest of the toolbar then change that pane only. Each pane has its own market, contract or continuous series, timeframe, indicators and chart type. Drawings stay stored per symbol, so the same symbol shows the same drawings in every pane.
+
+Switching from a single chart to **4** opens Brent (the resolved month, daily), GBP/USD, spot gold on the continuous series, and FTSE 100, all on **1D**. **6** adds Chicago wheat and London cocoa. Shrinking the grid keeps the other panes, so going back to 4 or 6 restores them. A pane can show that market’s forward curve instead of the price chart. Each pane prints the data source, the quote age, and any stale, proxy or unavailable note.
+
+**Sync crosshair** moves the crosshair to the same time on the other panes. **Sync time** makes pan and zoom follow one time window. **Link symbol** applies the next market you pick to every visible pane; turning the toggle on does not rewrite the panes that are already there.
+
+The layout and each pane’s settings are saved in `localStorage` (`mm-charts:layout:v1`) and written into the page URL, so a layout can be bookmarked. A URL that only has the old `m` and `tf` parameters still opens one chart. Panes request their own data; two panes on the same symbol and timeframe share one cached response for about 45 seconds. Below 900px the desk shows only the active pane.
+
 ## Data rules
 
 | Rule | Behaviour |
