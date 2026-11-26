@@ -266,24 +266,28 @@ export async function loadEnergyDaily(): Promise<Bar[]> {
     windows.push({ from, to });
   }
   const all: Bar[] = [];
-  for (let i = 0; i < windows.length; i += 4) {
-    const part = await Promise.all(windows.slice(i, i + 4).map(async (w) => {
-      const url = `https://api.energy-charts.info/price?bzn=DE-LU&start=${w.from.toISOString()}&end=${w.to.toISOString()}`;
-      try {
-        const body = JSON.parse(await text(url)) as { unix_seconds?: number[]; price?: (number | null)[] };
-        const times = body.unix_seconds ?? [];
-        const prices = body.price ?? [];
-        const raw: Bar[] = [];
-        for (let j = 0; j < times.length; j++) {
-          const value = prices[j];
-          if (typeof value === "number" && Number.isFinite(value)) raw.push(bar(times[j], value));
-        }
-        return bucket(raw, "1d");
-      } catch {
-        return [] as Bar[];
+  const deadline = Date.now() + 40_000;
+  let misses = 0;
+  for (const w of windows) {
+    if (Date.now() > deadline) break;
+    const url = `https://api.energy-charts.info/price?bzn=DE-LU&start=${w.from.toISOString()}&end=${w.to.toISOString()}`;
+    try {
+      const body = JSON.parse(await text(url)) as { unix_seconds?: number[]; price?: (number | null)[] };
+      const times = body.unix_seconds ?? [];
+      const prices = body.price ?? [];
+      const raw: Bar[] = [];
+      for (let j = 0; j < times.length; j++) {
+        const value = prices[j];
+        if (typeof value === "number" && Number.isFinite(value)) raw.push(bar(times[j], value));
       }
-    }));
-    for (const rows of part) all.push(...rows);
+      const daily = bucket(raw, "1d");
+      if (!daily.length) misses += 1;
+      else misses = 0;
+      all.push(...daily);
+    } catch {
+      misses += 1;
+    }
+    if (misses >= 3) break;
   }
   const daily = bucket([...cached, ...all], "1d");
   if (daily.length) await writeStoredBars(key, daily);
