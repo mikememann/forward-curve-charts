@@ -1,7 +1,8 @@
 import "server-only";
 import * as xlsx from "xlsx";
 import type { Market, SourceKind } from "@/config/markets";
-import { bar, fitFrequency, parseDay, parseMonthCode } from "@/lib/aggregate";
+import { bar, bucket, fitFrequency, parseDay, parseMonthCode } from "@/lib/aggregate";
+import { readStoredBars, readStoredText, writeStoredBars, writeStoredText } from "@/lib/barStore";
 import { parseBoeCsv, parseBundesbankCsv, parseFredCsv } from "@/lib/parseTables";
 import { DataError } from "@/lib/errors";
 import type { Bar, Timeframe } from "@/lib/types";
@@ -233,8 +234,8 @@ async function loadHormuz(): Promise<{ bars: Bar[]; instrumentName: string | nul
 
 async function loadAgsi(): Promise<{ bars: Bar[]; instrumentName: string | null }> {
   const key = process.env.AGSI_API_KEY ?? "";
-  const from = new Date(Date.now() - 800 * 86_400_000).toISOString().slice(0, 10);
-  const url = `https://agsi.gie.eu/api?type=eu&from=${from}&size=1200`;
+  const from = new Date(Date.now() - 10 * 365.25 * 86_400_000).toISOString().slice(0, 10);
+  const url = `https://agsi.gie.eu/api?type=eu&from=${from}&size=4000`;
   const body = JSON.parse(await text(url, { "x-key": key })) as { data?: { gasDayStart?: string; full?: string }[]; message?: string };
   if (!Array.isArray(body.data)) throw new DataError(body.message || "AGSI+ returned no EU storage series", "eu");
   const bars: Bar[] = [];
@@ -247,4 +248,103 @@ async function loadAgsi(): Promise<{ bars: Bar[]; instrumentName: string | null 
   bars.sort((a, b) => a.time - b.time);
   if (!bars.length) throw new DataError("AGSI+ returned no fullness observations", "eu");
   return { bars, instrumentName: "EU gas storage percent full" };
+}
+
+/** Day-ahead auction, aggregated to a daily bar. A year at a time, cached. */
+export async function loadEnergyDaily(): Promise<Bar[]> {
+  const key = "hist:energy:de-lu:1d";
+  const cached = await readStoredBars(key);
+  const now = Date.now() / 1000;
+  const spansTenYears = cached.length > 1 && now - cached[0].time > 8 * 365 * 86400;
+  const tailFresh = cached.length > 0 && now - cached[cached.length - 1].time < 2 * 86400;
+  if (spansTenYears && tailFresh) return cached;
+  const end = new Date();
+  const all: Bar[] = [];
+  for (let i = 0; i < 10; i++) {
+    const to = new Date(end.getTime() - i * 365 * 86400000);
+    const from = new Date(to.getTime() - 366 * 86400000);
+    const url = `https://api.energy-charts.info/price?bzn=DE-LU&start=${from.toISOString()}&end=${to.toISOString()}`;
+    try {
+      const body = JSON.parse(await text(url)) as { unix_seconds?: number[]; price?: (number | null)[] };
+      const times = body.unix_seconds ?? [];
+      const prices = body.price ?? [];
+      const raw: Bar[] = [];
+      for (let j = 0; j < times.length; j++) {
+        const value = prices[j];
+        if (typeof value === "number" && Number.isFinite(value)) raw.push(bar(times[j], value));
+      }
+      all.push(...bucket(raw, "1d"));
+    } catch (e) {
+      if (i === 0 && !cached.length) throw e;
+      break;
+    }
+  }
+  const daily = bucket([...cached, ...all], "1d");
+  if (daily.length) await writeStoredBars(key, daily);
+  if (!daily.length) throw new DataError("Energy-Charts returned no day-ahead prices", "DE-LU");
+  return daily;
+}
+
+/**
+ * Elexon only returns about a week per call. Walk back up to 10 years, a few
+ * weeks at a time, and keep the daily bars. A short request continues where
+ * the previous one stopped.
+ */
+export async function loadElexonDaily(): Promise<Bar[]> {
+  const key = "hist:elexon:apx:1d";
+  const doneKey = "hist:elexon:apx:1d:done";
+  const cached = await readStoredBars(key);
+  const done = await readStoredText(doneKey);
+  const nowMs = Date.now();
+  const now = nowMs / 1000;
+  const tailFresh = cached.length > 0 && now - cached[cached.length - 1].time < 2 * 86400;
+  if (tailFresh && done === "1") return cached;
+
+  const week = 7 * 86400000;
+  const oldest = nowMs - 10 * 365.25 * 86400000;
+  const windows: { from: string; to: string; fromSec: number }[] = [];
+  for (let end = nowMs; end > oldest; end -= week) {
+    const fromSec = Math.floor((end - 6 * 86400000) / 1000);
+    const covered = cached.some((b) => b.time >= fromSec && b.time < fromSec + 7 * 86400);
+    const recent = nowMs - end < 21 * 86400000;
+    if (covered && !recent) continue;
+    windows.push({
+      from: new Date(end - 6 * 86400000).toISOString().slice(0, 10),
+      to: new Date(end).toISOString().slice(0, 10),
+      fromSec,
+    });
+  }
+  const deadline = nowMs + (done === "1" ? 8_000 : 28_000);
+  const found: Bar[] = [];
+  let finished = true;
+  for (let i = 0; i < windows.length; i += 8) {
+    if (Date.now() > deadline) {
+      finished = false;
+      break;
+    }
+    const slice = windows.slice(i, i + 8);
+    const chunks = await Promise.all(slice.map((w) => elexonWindow(w.from, w.to)));
+    for (const rows of chunks) found.push(...rows);
+  }
+  const daily = bucket([...cached, ...found], "1d");
+  if (daily.length) await writeStoredBars(key, daily);
+  if (finished) await writeStoredText(doneKey, "1");
+  if (!daily.length) throw new DataError("Elexon returned no APX market-index prices", "APXMIDP");
+  return daily;
+}
+
+async function elexonWindow(from: string, to: string): Promise<Bar[]> {
+  const url = `https://data.elexon.co.uk/bmrs/api/v1/balancing/pricing/market-index?from=${from}&to=${to}`;
+  try {
+    const body = JSON.parse(await text(url)) as { data?: { startTime?: string; dataProvider?: string; price?: number }[] };
+    const raw: Bar[] = [];
+    for (const row of body.data ?? []) {
+      if (row.dataProvider !== "APXMIDP" || !row.startTime || typeof row.price !== "number") continue;
+      const time = Date.parse(row.startTime) / 1000;
+      if (Number.isFinite(time)) raw.push(bar(time, row.price));
+    }
+    return bucket(raw, "1d");
+  } catch {
+    return [];
+  }
 }

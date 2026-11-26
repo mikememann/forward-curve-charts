@@ -106,11 +106,11 @@ Without those three, every chart stays on its free feed and the IG watchlist row
 
 Historical bars are cached. When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set (Vercel KV or Upstash), the cache is stored there. Otherwise it is a file under `IG_CACHE_DIR` or the temp directory. The client asks only for the missing tail, in chunks of 100 points. The chart shows the remaining weekly allowance (10,000 points). Under 500 remaining, the chart uses the free feed.
 
-IG prices are displayed as **IG price (IG points)**. They are not a rescaled copy of the Yahoo or ICE series, and the two are not joined into one line. Forward curves stay on ICE for the London softs and on Yahoo for the other futures. The free leg of an IG market is that market's own feed: Yahoo, or ICE for London cocoa, white sugar, robusta and UK feed wheat. UK feed wheat has no IG epic.
+Intraday charts (15m and 1h) still show IG as IG points, on their own, for a short window. Daily and weekly charts go back up to 10 years on the free series (Yahoo `range=10y`, ICE's longest daily file, FRED, or the other free feed). The last 40 IG daily bars are joined onto that history only when the IG quote is a stable multiple of the free price (1, 10, 100, 1,000 or 10,000). Brent's 9160 is divided by 100 so it sits on the USD/bbl line. If the ratio is not stable, the IG tail is left off and the chart says so. Ten years is never requested from IG. The joined daily series is cached in KV and only the recent tail is refreshed. Forward curves are not joined. UK feed wheat has no IG epic.
 
-The visible chart does not preload every market. Auto mode fetches one short window: 64×15m, 120×1h or 120×1d points. Opening all 15 MM markets on the default daily chart is 15 × 120 = 1,800 points. Loading every market at the caps (300 daily plus 200 hourly) would be 15 × 500 = 7,500 points, so that is not the default.
+The visible chart does not preload every market. Auto mode still fetches a short intraday window: 64×15m or 120×1h points. A daily chart spends at most 40 IG points, and only when that tail is not already cached.
 
-| Market | Epic | 15m / 1h / short 1d | Weekly and long 1d |
+| Market | Epic | 15m / 1h | Daily and weekly |
 |---|---|---|---|
 | Brent | `CC.D.LCO.USS.IP` | IG, then free | Free |
 | EU TTF | `EN.D.ICETTF.Month3.IP` | IG, then free | Free |

@@ -270,7 +270,7 @@ export const lsegMarkets: Market[] = [
     nativeFrequency: "30m",
     licence: ELEXON,
     attribution: "Elexon Insights, APX market index price",
-    delayNote: "Half-hourly. The API serves about a week at a time; this chart stitches the last eight weeks.",
+    delayNote: "Half-hourly. Daily history walks Elexon a week at a time, up to 10 years, and keeps the result in the cache.",
     proxyNote: "APX half-hourly market index. Not the UK baseload Summer-27 forward.",
   },
   {

@@ -7,6 +7,7 @@ import type { Tool } from "@/components/uiTypes";
 import dynamic from "next/dynamic";
 
 const PriceChart = dynamic(() => import("@/components/PriceChart").then((m) => m.PriceChart), { ssr: false });
+import { HISTORY_BARS_1D, HISTORY_BARS_1W } from "@/lib/history";
 import type { PaneSettings } from "@/lib/layout";
 import { fetchCurve, fetchOhlc } from "@/lib/clientCache";
 import type { Drawing } from "@/lib/drawings";
@@ -121,6 +122,8 @@ function ChartPaneInner(props: Props, ref: ForwardedRef<PaneHandle>) {
           timeframe: settings.timeframe,
           market: viewModel && !viewModel.id.startsWith("custom:") ? viewModel.id : "",
         });
+    if (!spread && settings.timeframe === "1d") params.set("bars", String(HISTORY_BARS_1D));
+    if (!spread && settings.timeframe === "1w") params.set("bars", String(HISTORY_BARS_1W));
     if (!spread && viewModel?.sourceKind === "ice") params.set("strip", settings.strip || "front");
     if (!spread && settings.source && settings.source !== "auto") params.set("source", settings.source);
     const url = `/api/ohlc?${params}`;

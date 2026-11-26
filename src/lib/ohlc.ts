@@ -2,7 +2,10 @@ import "server-only";
 import { DataError } from "@/lib/errors";
 import { loadExternal } from "@/lib/sources";
 import { delayNoteFor, findMarketByTicker, type MarketView } from "@/lib/marketModel";
+import { bucket } from "@/lib/aggregate";
 import { bucketBars } from "@/lib/bucket";
+import { HISTORY_BARS_1D, HISTORY_BARS_1W } from "@/lib/history";
+import { buildDailyHistory } from "@/lib/longHistory";
 import { resolveContract } from "@/lib/contracts";
 import { currentAllowance, igConfigured, loadIgBars } from "@/lib/ig";
 import { loadIceSeries } from "@/lib/ice";
@@ -15,7 +18,7 @@ import { yahooChart, YahooError } from "@/lib/yahoo";
 const RANGE: Record<Timeframe, string> = {
   "15m": "60d",
   "1h": "730d",
-  "1d": "5y",
+  "1d": "10y",
   "1w": "10y",
 };
 
@@ -29,8 +32,8 @@ const INTERVAL: Record<Timeframe, string> = {
 const DEFAULT_BARS: Record<Timeframe, number> = {
   "15m": 1200,
   "1h": 1800,
-  "1d": 800,
-  "1w": 520,
+  "1d": HISTORY_BARS_1D,
+  "1w": HISTORY_BARS_1W,
 };
 
 export function defaultBars(tf: Timeframe): number {
@@ -55,8 +58,44 @@ export async function loadOhlc(opts: {
   const market = opts.market === undefined ? findMarketByTicker(ticker) : opts.market;
   const want = clamp(opts.bars ?? defaultBars(timeframe), 20, 5000);
   const warnings: string[] = [];
+  if (timeframe === "1d" || timeframe === "1w") {
+    const built = await buildDailyHistory({
+      market,
+      ticker,
+      source: opts.source ?? "auto",
+      strip: opts.strip ?? null,
+    });
+    if (!built.bars.length) throw new DataError(`No daily bars for ${ticker || market?.name || "this market"}`, ticker);
+    const series = timeframe === "1w" ? bucket(built.bars, "1w") : built.bars;
+    const sma200Daily = lastSma(built.bars.map((b) => b.close), 200);
+    if (sma200Daily == null) warnings.push(`200-day SMA unavailable: ${built.bars.length} daily bars (200 required).`);
+    const enriched = enrich(series, { closeOnly: built.closeOnly });
+    const body = pack(enriched.slice(-want), {
+      currency: built.currency,
+      shortName: built.shortName,
+      exchangeName: built.exchangeName,
+      instrumentType: null,
+      regularMarketPrice: built.regularMarketPrice,
+    }, {
+      ticker,
+      timeframe,
+      market,
+      sma200Daily,
+      warnings: [...built.warnings, ...warnings],
+      quoteTime: built.quoteTime,
+      sourceLabel: built.sourceLabel,
+      units: built.units ?? undefined,
+      priceSource: "free",
+      contractLabel: built.contractLabel,
+    });
+    if (built.iceContracts) {
+      body.iceContracts = built.iceContracts;
+      body.iceStrip = built.iceStrip;
+    }
+    return body;
+  }
   if (market?.igEpic || market?.sourceChain) {
-    const requested = opts.bars ?? (timeframe === "1d" ? 120 : timeframe === "1w" ? want : timeframe === "1h" ? 120 : 64);
+    const requested = opts.bars ?? (timeframe === "1h" ? 120 : 64);
     const choice = chooseFeed({
       chain: market.sourceChain,
       timeframe,
@@ -67,12 +106,12 @@ export async function loadOhlc(opts: {
       override: opts.source ?? "auto",
     });
     if (choice.reason) warnings.push(choice.reason);
-    if (choice.feed === "ig" && market.igEpic && (timeframe === "15m" || timeframe === "1h" || timeframe === "1d")) {
+    if (choice.feed === "ig" && market.igEpic) {
       try {
         const loaded = await loadIgBars(market.igEpic, timeframe, choice.igBars);
         if (loaded.bars.length) {
           const enriched = enrich(loaded.bars);
-          const sma200Daily = timeframe === "1d" ? enriched.at(-1)?.sma200 ?? null : null;
+          const sma200Daily = null;
           const body = pack(enriched, {
             currency: null,
             shortName: market.igEpic,
@@ -119,12 +158,6 @@ export async function loadOhlc(opts: {
       body.units = standIn.units;
       return body;
     }
-  }
-  if (market?.intradayOnly && (timeframe === "1d" || timeframe === "1w")) {
-    throw new DataError(
-      `${market.name} has no daily history on Yahoo (only a few days of intraday bars). Open 15m or 1h. Nothing has been backfilled.`,
-      market.ticker,
-    );
   }
   if (market?.requiresEnv && !process.env[market.requiresEnv]) {
     throw new DataError(
