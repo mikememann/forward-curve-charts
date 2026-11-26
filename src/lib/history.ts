@@ -2,8 +2,8 @@ import { barsFromCache, decodeKv } from "@/lib/igParse";
 import { londonYmd } from "@/lib/time";
 import type { Bar } from "@/lib/types";
 
-/** About ten years of sessions. The chart asks for this many daily bars. */
-export const HISTORY_BARS_1D = 2600;
+/** Ten years of daily bars, including weekends for power and macro series. */
+export const HISTORY_BARS_1D = 4000;
 /** About ten years of weeks. */
 export const HISTORY_BARS_1W = 600;
 /**
