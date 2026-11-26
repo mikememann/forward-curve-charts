@@ -259,25 +259,31 @@ export async function loadEnergyDaily(): Promise<Bar[]> {
   const tailFresh = cached.length > 0 && now - cached[cached.length - 1].time < 2 * 86400;
   if (spansTenYears && tailFresh) return cached;
   const end = new Date();
+  const windows: { from: Date; to: Date }[] = [];
+  for (let i = 0; i < 40; i++) {
+    const to = new Date(end.getTime() - i * 90 * 86400000);
+    const from = new Date(to.getTime() - 90 * 86400000);
+    windows.push({ from, to });
+  }
   const all: Bar[] = [];
-  for (let i = 0; i < 10; i++) {
-    const to = new Date(end.getTime() - i * 365 * 86400000);
-    const from = new Date(to.getTime() - 366 * 86400000);
-    const url = `https://api.energy-charts.info/price?bzn=DE-LU&start=${from.toISOString()}&end=${to.toISOString()}`;
-    try {
-      const body = JSON.parse(await text(url)) as { unix_seconds?: number[]; price?: (number | null)[] };
-      const times = body.unix_seconds ?? [];
-      const prices = body.price ?? [];
-      const raw: Bar[] = [];
-      for (let j = 0; j < times.length; j++) {
-        const value = prices[j];
-        if (typeof value === "number" && Number.isFinite(value)) raw.push(bar(times[j], value));
+  for (let i = 0; i < windows.length; i += 4) {
+    const part = await Promise.all(windows.slice(i, i + 4).map(async (w) => {
+      const url = `https://api.energy-charts.info/price?bzn=DE-LU&start=${w.from.toISOString()}&end=${w.to.toISOString()}`;
+      try {
+        const body = JSON.parse(await text(url)) as { unix_seconds?: number[]; price?: (number | null)[] };
+        const times = body.unix_seconds ?? [];
+        const prices = body.price ?? [];
+        const raw: Bar[] = [];
+        for (let j = 0; j < times.length; j++) {
+          const value = prices[j];
+          if (typeof value === "number" && Number.isFinite(value)) raw.push(bar(times[j], value));
+        }
+        return bucket(raw, "1d");
+      } catch {
+        return [] as Bar[];
       }
-      all.push(...bucket(raw, "1d"));
-    } catch (e) {
-      if (i === 0 && !cached.length) throw e;
-      break;
-    }
+    }));
+    for (const rows of part) all.push(...rows);
   }
   const daily = bucket([...cached, ...all], "1d");
   if (daily.length) await writeStoredBars(key, daily);

@@ -53,6 +53,12 @@ export function inferScale(primary: Bar[], other: Bar[]): number | null {
   return best;
 }
 
+/** Scale from the latest shared days. Older drift, such as a back-adjusted contract, is ignored. */
+export function recentScale(primary: Bar[], other: Bar[]): number | null {
+  const tail = [...primary].sort((a, b) => a.time - b.time).slice(-30);
+  return inferScale(tail, other);
+}
+
 /** Divide OHLC by the IG/free factor so both series share the free unit. */
 export function scaleBars(bars: Bar[], divisor: number): Bar[] {
   if (divisor === 1) return bars;
