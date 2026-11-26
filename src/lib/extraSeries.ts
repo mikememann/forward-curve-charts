@@ -184,7 +184,7 @@ async function loadIsm(): Promise<LoadedExtra> {
 }
 
 async function loadGilt(): Promise<LoadedExtra> {
-  const key = "boe:gilt1y:v1";
+  const key = "boe:gilt1y:v2";
   const cached = await readStoredBars(key);
   const meta = await readStoredJson(`${key}:meta`);
   const savedAt = meta && typeof meta === "object" && typeof (meta as { savedAt?: unknown }).savedAt === "number" ? (meta as { savedAt: number }).savedAt : 0;
@@ -220,7 +220,8 @@ async function giltZip(url: string): Promise<Bar[]> {
 
 function giltSheet(buf: Buffer): Bar[] {
   const book = xlsx.read(buf, { type: "buffer" });
-  const sheet = book.Sheets["4. spot curve"];
+  const sheetName = book.SheetNames.find((name) => /spot curve/i.test(name) && !/short/i.test(name));
+  const sheet = sheetName ? book.Sheets[sheetName] : undefined;
   if (!sheet) return [];
   const rows = xlsx.utils.sheet_to_json<(string | null)[]>(sheet, { header: 1, raw: false });
   const maturity = rows.findIndex((row) => (row ?? []).some((cell) => String(cell ?? "").trim() === "1.0"));
@@ -293,7 +294,7 @@ function parseBoeDate(value: string): number | null {
   const m = /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2,4})$/.exec(value.trim());
   if (!m || !BOE_MONTHS[m[2]]) return null;
   let year = Number(m[3]);
-  if (year < 100) year += 2000;
+  if (year < 100) year += year >= 70 ? 1900 : 2000;
   const t = Date.parse(`${year}-${String(BOE_MONTHS[m[2]]).padStart(2, "0")}-${m[1].padStart(2, "0")}T12:00:00Z`);
   return Number.isFinite(t) ? t / 1000 : null;
 }
