@@ -251,7 +251,7 @@ async function loadFree(
     );
     return { bars: loaded.bars, label: loaded.sourceLabel, warnings: [...loaded.warnings], exchangeName: null, currency: loaded.currency, shortName: loaded.instrumentName, infoNote: null, splice: null };
   }
-  const span = full ? YAHOO_PERIOD1[opts.ticker.toUpperCase()] : undefined;
+  const span = YAHOO_PERIOD1[opts.ticker.toUpperCase()];
   const chart = span ? await yahooDaily(opts.ticker, span) : await yahooChart(opts.ticker, "1d", full ? "10y" : "6mo");
   return {
     bars: bucket(chart.bars, "1d"),

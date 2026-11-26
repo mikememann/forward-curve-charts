@@ -129,9 +129,19 @@ async function oecd(ref: "EA20" | "GBR", name: string, note: string): Promise<Lo
   const cached = await readStoredBars(key);
   if (cached.length > 24) return plain(name, "index", cached, note);
   const url = `https://sdmx.oecd.org/public/rest/data/OECD.SDD.STES,DSD_STES@DF_CLI,4.1/${ref}.M.BCICP...AA...H?format=csv`;
-  const res = await fetch(url, { headers: { "User-Agent": "MMCharts/1.0", Accept: "text/csv" }, cache: "no-store" });
-  if (!res.ok) throw new DataError(`OECD HTTP ${res.status}`, ref);
-  const lines = (await res.text()).split(/\r?\n/);
+  let text = "";
+  let last = "OECD request failed";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch(url, { headers: { "User-Agent": "MMCharts/1.0", Accept: "text/csv" }, cache: "no-store" });
+    if (res.ok) {
+      text = await res.text();
+      break;
+    }
+    last = `OECD HTTP ${res.status}`;
+    await new Promise((resolve) => setTimeout(resolve, 700 * 2 ** attempt));
+  }
+  if (!text) throw new DataError(last, ref);
+  const lines = text.split(/\r?\n/);
   const head = lines[0]?.split(",") ?? [];
   const period = head.indexOf("TIME_PERIOD");
   const value = head.indexOf("OBS_VALUE");

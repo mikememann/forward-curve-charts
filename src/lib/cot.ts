@@ -19,22 +19,29 @@ export async function loadIceCocoaCot(): Promise<Bar[]> {
 
 async function loadIceMarketCot(key: string, market: string): Promise<Bar[]> {
   const cached = await readStoredBars(key);
-  const years = [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
+  const years = [2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014];
   const have = new Set(cached.map((bar) => new Date(bar.time * 1000).getUTCFullYear()));
-  const missing = years.filter((year) => year === 2026 || !have.has(year));
+  const missing = years.filter((year) => year >= 2025 || !have.has(year));
   const bars = [...cached];
   const deadline = Date.now() + 25_000;
   for (const year of missing) {
     if (Date.now() > deadline && bars.length) break;
-    const url = year >= 2026
-      ? "https://www.ice.com/publicdocs/cot_report/automated/COTHist2026.csv"
-      : `https://www.ice.com/publicdocs/futures/COTHist${year}.csv`;
-    try {
-      const csv = await iceText(url);
-      bars.push(...parseIceCot(csv, market));
-    } catch (e) {
-      if (!bars.length && year === 2026) throw e;
+    const urls = year >= 2025
+      ? [
+          `https://www.ice.com/publicdocs/futures/COTHist${year}.csv`,
+          `https://www.ice.com/publicdocs/cot_report/automated/COTHist${year}.csv`,
+        ]
+      : [`https://www.ice.com/publicdocs/futures/COTHist${year}.csv`];
+    let csv = "";
+    for (const url of urls) {
+      try {
+        csv = await iceText(url);
+        break;
+      } catch (e) {
+        if (url === urls[urls.length - 1] && !bars.length && year >= 2025) throw e;
+      }
     }
+    if (csv) bars.push(...parseIceCot(csv, market));
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
   const merged = dedupe(bars);
