@@ -16,12 +16,24 @@ import { currentAllowance, igConfigured, loadIgBars } from "@/lib/ig";
 import { loadContracts, loadIceSeries, pickContract } from "@/lib/ice";
 import type { MarketView } from "@/lib/marketModel";
 import { chooseFeed } from "@/lib/sourceChain";
+import { loadEuronextContinuous } from "@/lib/euronext";
+import { loadExtra } from "@/lib/extraSeries";
 import { loadSplice } from "@/lib/spliceSeries";
 import { loadElexonDaily, loadEnergyDaily, loadExternal } from "@/lib/sources";
+import { yahooDaily } from "@/lib/yahoo";
 import type { Bar, SpliceInfo } from "@/lib/types";
 import { yahooChart } from "@/lib/yahoo";
 
 const FRESH_SEC = 45 * 60;
+
+/** Daily history must use period1. range=max is monthly for some of these futures. */
+const YAHOO_PERIOD1: Record<string, number> = {
+  "CPO=F": Date.parse("2010-05-25T00:00:00Z") / 1000,
+  "UFV=F": Date.parse("2020-02-01T00:00:00Z") / 1000,
+  "UME=F": Date.parse("2017-06-01T00:00:00Z") / 1000,
+  DBA: Date.parse("2007-01-01T00:00:00Z") / 1000,
+  DBE: Date.parse("2007-01-01T00:00:00Z") / 1000,
+};
 
 export interface IceListItem {
   marketId: number;
@@ -170,6 +182,33 @@ async function loadFree(
       splice: loaded.splice,
     };
   }
+  if (market?.sourceKind === "euronext" && (market.seriesId === "EBM" || market.seriesId === "EMA")) {
+    const loaded = await loadEuronextContinuous(market.seriesId);
+    const rolls = loaded.rolls.slice(-6);
+    return {
+      bars: loaded.bars,
+      label: `Euronext ${market.seriesId} front month`,
+      warnings: rolls.length ? [`Front-month rolls: ${rolls.join("; ")}`] : [],
+      exchangeName: "Euronext",
+      currency: "EUR",
+      shortName: market.seriesId,
+      infoNote: "EUR per tonne. Live contracts only, chained into a front-month series. Expired months return nothing, so this is about two to three years. Free to view for personal analysis, not for redistribution.",
+      splice: null,
+    };
+  }
+  if (market?.sourceKind === "special" && market.seriesId) {
+    const loaded = await loadExtra(market.seriesId);
+    return {
+      bars: loaded.bars,
+      label: loaded.label,
+      warnings: loaded.warnings,
+      exchangeName: null,
+      currency: null,
+      shortName: loaded.shortName,
+      infoNote: loaded.infoNote,
+      splice: loaded.splice,
+    };
+  }
   if (market?.sourceKind === "ice" && market.ice) {
     const loaded = await loadIceSeries(market.ice, "1d", opts.strip);
     return { bars: loaded.bars, label: "ICE", warnings: [...loaded.warnings], exchangeName: "ICE Futures Europe", currency: null, shortName: null, infoNote: null, splice: null };
@@ -212,7 +251,8 @@ async function loadFree(
     );
     return { bars: loaded.bars, label: loaded.sourceLabel, warnings: [...loaded.warnings], exchangeName: null, currency: loaded.currency, shortName: loaded.instrumentName, infoNote: null, splice: null };
   }
-  const chart = await yahooChart(opts.ticker, "1d", full ? "10y" : "6mo");
+  const span = full ? YAHOO_PERIOD1[opts.ticker.toUpperCase()] : undefined;
+  const chart = span ? await yahooDaily(opts.ticker, span) : await yahooChart(opts.ticker, "1d", full ? "10y" : "6mo");
   return {
     bars: bucket(chart.bars, "1d"),
     label: "Yahoo Finance",

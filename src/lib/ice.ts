@@ -379,6 +379,44 @@ export function pickContract(list: IceContract[], strip: string | null, now = ne
 
 const DAY = 86_400;
 
+/** Forward curve from the contract board only. Does not request a history file per month. */
+export async function loadIceBoard(opts: {
+  id: string;
+  name: string;
+  units: string;
+  decimals: number;
+  note: string;
+  product: IceProduct;
+  keep: (strip: string) => boolean;
+}): Promise<CurveResponse> {
+  const { list } = await loadContracts(opts.product);
+  const kept = list.filter((c) => opts.keep(c.strip));
+  const points = kept.map((c) => ({
+    ticker: String(c.marketId),
+    contract: c.label,
+    month: c.monthKey,
+    price: c.lastPrice,
+    priceTimeUnix: c.lastTimeUnix,
+    week: null,
+    weekTimeUnix: null,
+    monthAgo: null,
+    monthAgoTimeUnix: null,
+  }));
+  return {
+    id: opts.id,
+    name: opts.name,
+    units: opts.units,
+    decimals: opts.decimals,
+    source: "ICE",
+    delayNote: "Delayed ICE last prices. Not a settlement file and not for redistribution.",
+    fetchedAt: new Date().toISOString(),
+    note: opts.note,
+    points: trimCurve(points),
+    gaps: points.filter((p) => p.price == null).map((p) => `${p.contract}: no price`),
+    spreads: curveSpreads(points),
+  };
+}
+
 export async function loadIceCurve(opts: {
   id: string;
   name: string;
