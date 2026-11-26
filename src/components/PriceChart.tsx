@@ -579,6 +579,7 @@ function buildScene(
     bb: p.show.bb ? bars.filter((b) => b.bbUpper != null && b.bbLower != null).map((b) => ({ time: b.time, upper: b.bbUpper as number, lower: b.bbLower as number })) : null,
     cloud,
     divergences,
+    marks: p.payload.splice?.marks ?? [],
     decimals: guessDecimals(p.payload),
   };
 }

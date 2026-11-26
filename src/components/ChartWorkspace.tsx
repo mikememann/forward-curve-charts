@@ -252,7 +252,7 @@ export function ChartWorkspace() {
       view: p.view === "curve" && m && !m.curveId ? "chart" : p.view,
       strip: "front",
       source: "auto",
-      chartType: m?.sourceKind === "ice" && m.igEpic ? p.chartType : m?.sourceKind === "ice" ? "line" : p.chartType,
+      chartType: m?.sourceKind === "splice" || (m?.sourceKind === "ice" && !m.igEpic) ? "line" : p.chartType,
     }), true);
   }
 

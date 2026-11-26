@@ -1,6 +1,6 @@
 import { barsFromCache, decodeKv } from "@/lib/igParse";
 import { londonYmd } from "@/lib/time";
-import type { Bar } from "@/lib/types";
+import type { Bar, SpliceInfo } from "@/lib/types";
 
 /** Ten years of daily bars, including weekends for power and macro series. */
 export const HISTORY_BARS_1D = 4000;
@@ -97,6 +97,8 @@ export interface CachedHistory {
   currency: string | null;
   shortName: string | null;
   savedAt: number;
+  infoNote: string | null;
+  splice: SpliceInfo | null;
 }
 
 export function historyFromCache(input: unknown): CachedHistory | null {
@@ -116,5 +118,25 @@ export function historyFromCache(input: unknown): CachedHistory | null {
     currency: typeof row.currency === "string" ? row.currency : null,
     shortName: typeof row.shortName === "string" ? row.shortName : null,
     savedAt: typeof row.savedAt === "number" ? row.savedAt : 0,
+    infoNote: typeof row.infoNote === "string" ? row.infoNote : null,
+    splice: readSplice(row.splice),
+  };
+}
+
+function readSplice(value: unknown): SpliceInfo | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Partial<SpliceInfo>;
+  if (!Array.isArray(row.marks) || typeof row.legend !== "string" || typeof row.nativeUnit !== "string") return null;
+  return {
+    time: typeof row.time === "number" ? row.time : null,
+    gap: typeof row.gap === "number" ? row.gap : null,
+    monthlyClose: typeof row.monthlyClose === "number" ? row.monthlyClose : null,
+    recentClose: typeof row.recentClose === "number" ? row.recentClose : null,
+    states: typeof row.states === "string" ? row.states : null,
+    nativeLast: typeof row.nativeLast === "number" ? row.nativeLast : null,
+    nativeUnit: row.nativeUnit,
+    usdLast: typeof row.usdLast === "number" ? row.usdLast : null,
+    legend: row.legend,
+    marks: row.marks.filter((mark) => mark && typeof mark.time === "number" && typeof mark.label === "string" && (mark.kind === "splice" || mark.kind === "break")),
   };
 }

@@ -16,8 +16,9 @@ import { currentAllowance, igConfigured, loadIgBars } from "@/lib/ig";
 import { loadContracts, loadIceSeries, pickContract } from "@/lib/ice";
 import type { MarketView } from "@/lib/marketModel";
 import { chooseFeed } from "@/lib/sourceChain";
+import { loadSplice } from "@/lib/spliceSeries";
 import { loadElexonDaily, loadEnergyDaily, loadExternal } from "@/lib/sources";
-import type { Bar } from "@/lib/types";
+import type { Bar, SpliceInfo } from "@/lib/types";
 import { yahooChart } from "@/lib/yahoo";
 
 const FRESH_SEC = 45 * 60;
@@ -43,6 +44,8 @@ export interface BuiltDaily {
   iceContracts: IceListItem[] | null;
   iceStrip: string | null;
   closeOnly: boolean;
+  infoNote: string | null;
+  splice: SpliceInfo | null;
 }
 
 /**
@@ -80,6 +83,8 @@ export async function buildDailyHistory(opts: {
   let exchangeName: string | null = cached?.exchangeName ?? null;
   let currency: string | null = cached?.currency ?? null;
   let shortName: string | null = cached?.shortName ?? null;
+  let infoNote: string | null = cached?.infoNote ?? null;
+  let splice: SpliceInfo | null = cached?.splice ?? null;
   let continuousNote = cached?.continuousNote ?? null;
 
   if (cached && now - cached.savedAt < FRESH_SEC) {
@@ -104,6 +109,8 @@ export async function buildDailyHistory(opts: {
     exchangeName = free.exchangeName ?? exchangeName;
     currency = free.currency ?? currency;
     shortName = free.shortName ?? shortName;
+    infoNote = free.infoNote ?? infoNote;
+    splice = free.splice ?? splice;
     if (yearsBack(bars, now) < 9) {
       warnings.push(`No 10-year daily file for this market. The series starts ${bars[0] ? new Date(bars[0].time * 1000).toISOString().slice(0, 10) : "empty"}.`);
     }
@@ -118,6 +125,8 @@ export async function buildDailyHistory(opts: {
       currency,
       shortName,
       savedAt: now,
+      infoNote,
+      splice,
     };
     if (bars.length) await writeStoredJson(key, blob);
   }
@@ -138,17 +147,32 @@ export async function buildDailyHistory(opts: {
     iceContracts: ice?.contracts ?? null,
     iceStrip: ice?.strip ?? null,
     closeOnly: false,
+    infoNote,
+    splice,
   };
 }
 
 async function loadFree(
   opts: { market: MarketView | null; ticker: string; strip: string | null },
   full: boolean,
-): Promise<{ bars: Bar[]; label: string; warnings: string[]; exchangeName: string | null; currency: string | null; shortName: string | null }> {
+): Promise<{ bars: Bar[]; label: string; warnings: string[]; exchangeName: string | null; currency: string | null; shortName: string | null; infoNote: string | null; splice: SpliceInfo | null }> {
   const market = opts.market;
+  if (market?.sourceKind === "splice" && market.seriesId) {
+    const loaded = await loadSplice(market.seriesId);
+    return {
+      bars: loaded.bars,
+      label: loaded.sourceLabel,
+      warnings: loaded.warnings,
+      exchangeName: null,
+      currency: "USD",
+      shortName: loaded.shortName,
+      infoNote: loaded.infoNote,
+      splice: loaded.splice,
+    };
+  }
   if (market?.sourceKind === "ice" && market.ice) {
     const loaded = await loadIceSeries(market.ice, "1d", opts.strip);
-    return { bars: loaded.bars, label: "ICE", warnings: [...loaded.warnings], exchangeName: "ICE Futures Europe", currency: null, shortName: null };
+    return { bars: loaded.bars, label: "ICE", warnings: [...loaded.warnings], exchangeName: "ICE Futures Europe", currency: null, shortName: null, infoNote: null, splice: null };
   }
   if (market?.sourceKind === "energycharts") {
     return {
@@ -158,6 +182,8 @@ async function loadFree(
       exchangeName: null,
       currency: "EUR",
       shortName: "DE-LU",
+      infoNote: null,
+      splice: null,
     };
   }
   if (market?.sourceKind === "elexon") {
@@ -168,6 +194,8 @@ async function loadFree(
       exchangeName: null,
       currency: "GBP",
       shortName: "APXMIDP",
+      infoNote: null,
+      splice: null,
     };
   }
   if (market && market.sourceKind !== "yahoo") {
@@ -182,7 +210,7 @@ async function loadFree(
       },
       "1d",
     );
-    return { bars: loaded.bars, label: loaded.sourceLabel, warnings: [...loaded.warnings], exchangeName: null, currency: loaded.currency, shortName: loaded.instrumentName };
+    return { bars: loaded.bars, label: loaded.sourceLabel, warnings: [...loaded.warnings], exchangeName: null, currency: loaded.currency, shortName: loaded.instrumentName, infoNote: null, splice: null };
   }
   const chart = await yahooChart(opts.ticker, "1d", full ? "10y" : "6mo");
   return {
@@ -192,6 +220,8 @@ async function loadFree(
     exchangeName: chart.meta.exchangeName,
     currency: chart.meta.currency,
     shortName: chart.meta.shortName,
+    infoNote: null,
+    splice: null,
   };
 }
 

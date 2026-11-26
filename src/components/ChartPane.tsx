@@ -198,6 +198,7 @@ function ChartPaneInner(props: Props, ref: ForwardedRef<PaneHandle>) {
         </p>
       )}
       {!props.solo && viewModel?.proxyNote && settings.view === "chart" && <p className="pane-note">{viewModel.proxyNote}</p>}
+      {!props.solo && payload?.splice && settings.view === "chart" && <p className="pane-note">{payload.splice.legend}</p>}
       <div className="pane-body">
         {unavailable && (
           <div className="error-state pane-error">

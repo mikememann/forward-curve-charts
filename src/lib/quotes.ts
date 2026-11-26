@@ -2,6 +2,7 @@ import "server-only";
 import { DataError } from "@/lib/errors";
 import { quote as iceFrontQuote } from "@/lib/ice";
 import { resolveContract } from "@/lib/contracts";
+import { loadSplice } from "@/lib/spliceSeries";
 import { loadExternal } from "@/lib/sources";
 import { bucketBars } from "@/lib/bucket";
 import { previousFromChange } from "@/lib/format";
@@ -92,6 +93,26 @@ async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
       quote.changeBasis = quote.changeBasis ? `${quote.changeBasis} · stand-in` : "stand-in";
       if (!quote.last) quote.error = `ICE did not load (${message}).`;
       return quote;
+    }
+  }
+  if (view.sourceKind === "splice" && view.seriesId) {
+    try {
+      const loaded = await loadSplice(view.seriesId);
+      const bars = loaded.bars;
+      const lastBar = bars.at(-1);
+      const prev = bars.at(-2);
+      const base = shell(view, loaded.sourceLabel);
+      base.last = lastBar?.close ?? null;
+      base.asOfUnix = lastBar?.time ?? null;
+      base.lastUpdatedLabel = lastBar ? formatLondon(lastBar.time, "date") : null;
+      if (lastBar && prev && prev.close !== 0) {
+        base.change = lastBar.close - prev.close;
+        base.changePct = (base.change / Math.abs(prev.close)) * 100;
+        base.changeBasis = "previous observation";
+      }
+      return base;
+    } catch (e) {
+      return blank(view, e instanceof DataError ? e.message : e instanceof Error ? e.message : "Couldn't load");
     }
   }
   if (view.sourceKind !== "yahoo") {
