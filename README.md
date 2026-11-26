@@ -66,12 +66,22 @@ The sidebar search adds a Yahoo symbol for this browser only (`localStorage`). I
 - Drawings, stored per symbol in `localStorage`: horizontal levels, trendlines (extended right), Fibonacci (0% on the second click; **Auto Fib** uses the same swing rule as the analyst’s chart script), Andrews pitchfork from three clicks or **Auto fork**, one or two anchored VWAPs (needs volume). **Trade** draws entry, stop, T1, T2 with R/R from the midpoint of the entry, and a stop distance in ATRs. **Context** draws the levels with no long/short label.
 - **Compare** overlays up to three watchlist symbols, each rebased to 0% at the start of the loaded window (dashed line is the charted symbol).
 
+## Several charts at once
+
+The toolbar layout control is **1**, **2** (side by side), **4** (2×2) or **6** (3×2). Click a pane to make it active: it gets an amber border, and the watchlist and the rest of the toolbar then change that pane only. Each pane has its own market, contract or continuous series, timeframe, indicators and chart type. Drawings stay stored per symbol, so the same symbol shows the same drawings in every pane.
+
+Switching from a single chart to **4** opens Brent (the resolved month, daily), GBP/USD, spot gold on the continuous series, and FTSE 100, all on **1D**. **6** adds Chicago wheat and London cocoa. Shrinking the grid keeps the other panes, so going back to 4 or 6 restores them. A pane can show that market’s forward curve instead of the price chart. Each pane prints the data source, the quote age, and any stale, proxy or unavailable note.
+
+**Sync crosshair** moves the crosshair to the same time on the other panes. **Sync time** makes pan and zoom follow one time window. **Link symbol** applies the next market you pick to every visible pane; turning the toggle on does not rewrite the panes that are already there.
+
+The layout and each pane’s settings are saved in `localStorage` (`mm-charts:layout:v1`) and written into the page URL, so a layout can be bookmarked. A URL that only has the old `m` and `tf` parameters still opens one chart. Panes request their own data; two panes on the same symbol and timeframe share one cached response for about 45 seconds. Below 900px the desk shows only the active pane.
+
 ## Data rules
 
 | Rule | Behaviour |
 |---|---|
 | Futures contracts | The chart opens on the resolved month and prints the contract name (`Feb 2027`, `BZG27.NYM`). **Continuous** switches to the Yahoo `=F` series and says it is back-adjusted. |
-| Proxies | An amber banner stays on screen. GBP/USD is spot, not the Dec-26 forward and not ×10,000. Gold `GC=F` is COMEX continuous, not a spot fix. Cocoa is NY USD/t, not London GBP/t. Sugar is No.11 USc/lb, not London No.5. |
+| Proxies | An amber banner stays on screen. GBP/USD is spot, not the Dec-26 forward and not ×10,000. Gold `GC=F` is COMEX continuous, not a spot fix. London cocoa, white sugar, robusta and UK feed wheat come from ICE. If that request fails, cocoa, sugar and robusta fall back to the old stand-in and say so. UK wheat does not fall back to Chicago wheat. |
 | FX day change | Versus the **22:00 Europe/London** print (close of the 21:00–22:00 hour), not Yahoo’s official daily close. If that bar is missing, the change is `n/a`. |
 | TTF | If the last bar is more than one London business day behind, the price is **n/a** and the last-updated date is shown. History can still be charted, labelled as history. |
 | LSE stocks | BP and Tesco stay in pence (`p` / `GBp`). They are not divided by 100. FTSE 100 is index points. |
@@ -96,7 +106,7 @@ Without those three, every chart stays on its free feed and the IG watchlist row
 
 Historical bars are cached. When `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set (Vercel KV or Upstash), the cache is stored there. Otherwise it is a file under `IG_CACHE_DIR` or the temp directory. The client asks only for the missing tail, in chunks of 100 points. The chart shows the remaining weekly allowance (10,000 points). Under 500 remaining, the chart uses the free feed.
 
-IG prices are displayed as **IG price (IG points)**. They are not a rescaled copy of the Yahoo or exchange series, and the two are not joined into one line. Forward curves stay on the free contract chain. PRs #2 and #3 were not merged when this was branched, so there is no multi-chart grid and no ICE feed here. The free leg of the chain is the existing Yahoo or FRED series. UK feed wheat has no IG epic.
+IG prices are displayed as **IG price (IG points)**. They are not a rescaled copy of the Yahoo or ICE series, and the two are not joined into one line. Forward curves stay on ICE for the London softs and on Yahoo for the other futures. The free leg of an IG market is that market's own feed: Yahoo, or ICE for London cocoa, white sugar, robusta and UK feed wheat. UK feed wheat has no IG epic.
 
 The visible chart does not preload every market. Auto mode fetches one short window: 64×15m, 120×1h or 120×1d points. Opening all 15 MM markets on the default daily chart is 15 × 120 = 1,800 points. Loading every market at the caps (300 daily plus 200 hourly) would be 15 × 500 = 7,500 points, so that is not the default.
 
@@ -108,20 +118,32 @@ The visible chart does not preload every market. Auto mode fetches one short win
 | GBP/EUR | `CS.D.GBPEUR.TODAY.IP` | IG, then free | Free |
 | GBP/ZAR | `CS.D.GBPZAR.TODAY.IP` | IG, then free | Free |
 | Spot gold | `CS.D.USCGC.TODAY.IP` | IG, then free | Free |
-| London cocoa | `CC.D.LCC.USS.IP` | IG, then free | Free |
-| Chicago wheat | `CO.D.W.Month1.IP` | IG, then free | Free |
-| London sugar No.5 | `CC.D.LSU.USS.IP` | IG, then free | Free |
+| London cocoa | `CC.D.LCC.USS.IP` | IG, then ICE | ICE |
+| Chicago wheat | `CO.D.W.Month1.IP` | IG, then Yahoo | Yahoo |
+| London sugar No.5 | `CC.D.LSU.USS.IP` | IG, then ICE | ICE |
 | Corn | `CC.D.C.USS.IP` | IG, then free | Free |
 | FTSE 100 | `IX.D.FTSE.DAILY.IP` | IG, then free | Free |
 | NVIDIA | `UC.D.NVDA.DAILY.IP` | IG, then free | Free |
 | BP | `KA.D.BP.DAILY.IP` | IG, then free | Free |
 | Tesco | `KA.D.TSCO.DAILY.IP` | IG, then free | Free |
 | Vertex | `UD.D.VRTX.DAILY.IP` | IG, then free | Free |
-| Robusta | `CC.D.LKD.USS.IP` (DFB). Jan-27 is `CO.D.LKD.Month3.IP` | IG, then the IMF series | IMF series |
-| UK feed wheat | none | Free only. An IG search found nothing | Free only |
+| Robusta | `CC.D.LKD.USS.IP` (DFB). Jan-27 is `CO.D.LKD.Month3.IP` | IG, then ICE | ICE |
+| UK feed wheat | none. An IG search for “feed wheat” found nothing | ICE only | ICE only |
 | LSEG macro, FRED, BoE and the rest | none | Unchanged | Unchanged |
 
-`/api/ohlc` accepts `source=ig` or `source=free`. Omitting it follows the chain.
+`/api/ohlc` accepts `source=ig` or `source=free`. Omitting it follows the chain. Each chart pane has its own Auto / Free / IG switch.
+
+## ICE London softs
+
+London cocoa, white sugar No.5, robusta coffee and UK feed wheat use ICE's charting JSON. These routes are **undocumented and may change**. The server sends a browser User-Agent. If a request fails, the chart says so. Cocoa, sugar and robusta then show the old stand-in, labelled. UK feed wheat does not fall back to Chicago wheat.
+
+ICE data is **free to view for personal use and not for redistribution**. The same note is in `src/lib/ice.ts`.
+
+`contract-data?productId=&hubId=` builds the contract picker and the forward curve. Saved market ids are used only when that list does not answer. **Front** skips a contract whose delivery month starts within 14 days. On 25 Nov 2026 that rolls cocoa off Dec26 (`8012782`, expiring) onto Mar27 (`8174255`). The curve still lists the expiring month.
+
+Daily history uses `historicalSpan` 1 (about 3 months), 2 (about a year) or 3 (the longest series). It stops at the previous session, so the chart appends today's last 10-minute price. Intraday is today's 10-minute closes. Each fetch is appended to a file (`ICE_CACHE_DIR`, or the temp directory) so a long-running server accumulates intraday history. On Vercel that file lasts for the life of the instance.
+
+The series is close-based. Hourly candles take the high and low from those 10-minute closes, which understates the traded range. Stochastic and ATR still run, with that warning on the chart. **15m** shows the 10-minute closes, because ICE does not publish 15-minute bars. NY cocoa (CC), sugar No.11 (SB) and Coffee C (KC) can be overlaid as Yahoo true OHLC. They are different contracts. Nothing is multiplied by GBPUSD. UK feed wheat intraday is often sparse, and the chart says when it is.
 
 ## LSEG Workspace layout
 
@@ -131,7 +153,8 @@ Rows that are view-only, proprietary, or unclear are listed in the same groups a
 
 | Source | What it feeds | Licence |
 |---|---|---|
-| Yahoo Finance | Futures, FX, equities, GSCI, NBP, palm oil, CBOT urea | Free to view, personal use, no redistribution |
+| Yahoo Finance | Futures, FX, equities, GSCI, NBP, palm oil, CBOT urea, NY cocoa and sugar No.11 | Free to view, personal use, no redistribution |
+| ICE charting | London cocoa (GBP/t), white sugar No.5 (USD/t), robusta (USD/t), UK feed wheat (GBP/t) | Free to view, personal use, **not for redistribution** |
 | FRED | EIA Brent spot, IMF monthly oils, policy rates, US yields, PPI | Public domain |
 | Bank of England IADB | Bank Rate, 5y and 10y gilt par yields | Free reuse with attribution |
 | Deutsche Bundesbank BBSIS | German 1y / 5y / 10y curve yields | Free reuse with attribution |

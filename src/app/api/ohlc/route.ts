@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
   const marketId = req.nextUrl.searchParams.get("market");
   const sourceRaw = req.nextUrl.searchParams.get("source");
   const source = sourceRaw === "ig" || sourceRaw === "free" ? sourceRaw : "auto";
+  const strip = req.nextUrl.searchParams.get("strip");
   const barsRaw = req.nextUrl.searchParams.get("bars");
   if (!isTimeframe(timeframe)) return bad("timeframe must be one of 15m, 1h, 1d, 1w");
   const bars = barsRaw == null ? undefined : Number(barsRaw);
@@ -44,7 +45,7 @@ export async function GET(req: NextRequest) {
   if (yahooTicker && (!ticker || !TICKER_RE.test(ticker))) return bad("ticker is required (Yahoo symbol, e.g. BZG27.NYM or GBPUSD=X), or pass formula");
   if (!yahooTicker && !market) return bad("unknown market");
   try {
-    const payload = await loadOhlc({ ticker, timeframe, bars, market, source });
+    const payload = await loadOhlc({ ticker, timeframe, bars, market, source, strip });
     if (format === "csv") {
       return new Response(ohlcToCsv(payload), {
         headers: {

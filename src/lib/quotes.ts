@@ -1,5 +1,7 @@
 import "server-only";
 import { DataError } from "@/lib/errors";
+import { quote as iceFrontQuote } from "@/lib/ice";
+import { resolveContract } from "@/lib/contracts";
 import { loadExternal } from "@/lib/sources";
 import { bucketBars } from "@/lib/bucket";
 import { previousFromChange } from "@/lib/format";
@@ -59,6 +61,8 @@ async function quoteForCustom(ticker: string): Promise<Quote> {
     igEpic: null,
     igEpicAlt: null,
     sourceChain: null,
+    ice: null,
+    iceFallback: null,
   };
   try {
     const q = await buildQuote(ticker, stub);
@@ -72,6 +76,23 @@ async function quoteForCustom(ticker: string): Promise<Quote> {
 async function buildQuote(ticker: string, view: MarketView): Promise<Quote> {
   if (view.requiresEnv && !process.env[view.requiresEnv]) {
     return blank(view, `Off until ${view.requiresEnv} is set. No figure is shown without it.`);
+  }
+  if (view.sourceKind === "ice" && view.ice) {
+    try {
+      return await iceQuote(view);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "ICE request failed";
+      if (!view.iceFallback) return blank(view, `ICE charting did not load (${message}). These endpoints are undocumented and may have changed. No stand-in is substituted.`);
+      const standIn = iceFallbackView(view);
+      const quote = await buildQuote(standIn.ticker, standIn);
+      quote.proxy = true;
+      quote.proxyNote = standIn.proxyNote;
+      quote.exactness = "proxy";
+      quote.error = null;
+      quote.changeBasis = quote.changeBasis ? `${quote.changeBasis} · stand-in` : "stand-in";
+      if (!quote.last) quote.error = `ICE did not load (${message}).`;
+      return quote;
+    }
   }
   if (view.sourceKind !== "yahoo") {
     try {
@@ -191,6 +212,63 @@ function shell(view: MarketView, sourceName: string): Quote {
     delayNote: view.delayNote ?? delayNoteFor(view.assetClass, view.fxClose22),
     hasCurve: Boolean(view.curveId),
     error: null,
+  };
+}
+
+async function iceQuote(view: MarketView): Promise<Quote> {
+  const contract = await iceFrontQuote(view.ice!);
+  if (!contract || contract.lastPrice == null) return blank(view, "ICE returned no last price");
+  const base = shell(view, "ICE");
+  base.ticker = String(contract.marketId);
+  base.contractLabel = contract.label;
+  base.last = contract.lastPrice;
+  base.asOfUnix = contract.lastTimeUnix;
+  base.lastUpdatedLabel = contract.lastTimeUnix ? formatLondon(contract.lastTimeUnix) : null;
+  base.delayNote = view.delayNote ?? "Delayed. Close-only.";
+  base.currency = view.units.startsWith("GBP") ? "GBP" : view.units.startsWith("USD") ? "USD" : null;
+  if (contract.changePct != null && contract.lastPrice !== 0) {
+    const prev = contract.lastPrice / (1 + contract.changePct / 100);
+    base.change = contract.lastPrice - prev;
+    base.changePct = contract.changePct;
+    base.changeBasis = "previous close";
+  }
+  return base;
+}
+
+function iceFallbackView(view: MarketView): MarketView {
+  const fb = view.iceFallback;
+  if (!fb) return view;
+  if (fb.kind === "yahoo") {
+    const contract = resolveContract(fb.contract);
+    return {
+      ...view,
+      sourceKind: "yahoo",
+      ice: null,
+      iceFallback: null,
+      units: fb.units,
+      ticker: contract.ticker,
+      contractTicker: contract.ticker,
+      contractLabel: contract.label,
+      contract,
+      continuous: null,
+      proxyNote: fb.note,
+      infoNote: fb.note,
+      exactness: "proxy",
+    };
+  }
+  return {
+    ...view,
+    sourceKind: "fred",
+    ice: null,
+    iceFallback: null,
+    units: fb.units,
+    ticker: fb.seriesId,
+    seriesId: fb.seriesId,
+    nativeFrequency: fb.nativeFrequency,
+    proxyNote: fb.note,
+    infoNote: fb.note,
+    exactness: "proxy",
+    delayNote: "Monthly IMF average.",
   };
 }
 

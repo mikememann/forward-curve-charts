@@ -41,7 +41,14 @@ export type SourceKind =
   | "energycharts"
   | "elexon"
   | "portwatch"
-  | "agsi";
+  | "agsi"
+  | "ice";
+
+/**
+ * ICE charting data is free to view for personal use.
+ * It is not licensed for redistribution.
+ */
+export const ICE_LICENCE = "ICE: free to view, personal use, not for redistribution";
 export type Exactness = "exact" | "near-exact" | "proxy";
 export type NativeFrequency = "15m" | "30m" | "1h" | "1d" | "1w" | "1mo";
 
@@ -70,6 +77,23 @@ export interface ContractSpec {
    */
   minDaysToExpiry?: number;
 }
+
+/** Charting product/hub ids from the ICE product-guide spec. The spec id is not the charting product id. */
+export interface IceProduct {
+  specId: number;
+  productId: number;
+  hubId: number;
+  /** On-screen label, including the unit. */
+  label: string;
+  /** Yahoo market shown as an optional true-OHLC comparison. Different contract and units. */
+  compareMarketId?: string;
+  compareLabel?: string;
+}
+
+/** Previous stand-in, used only when the ICE charting request fails. */
+export type IceFallback =
+  | { kind: "yahoo"; contract: ContractSpec; units: string; note: string }
+  | { kind: "fred"; seriesId: string; nativeFrequency: NativeFrequency; units: string; note: string };
 
 export interface CurveConfig {
   /** Shown under the curve. Say what is missing — do not paper over gaps. */
@@ -142,6 +166,10 @@ export interface Market {
    * Weekly and long daily history follow `history`.
    */
   sourceChain?: SourceChain;
+  /** ICE charting product. `source` must be "ice". */
+  ice?: IceProduct;
+  /** Labelled stand-in when the ICE request fails. UK wheat has none. */
+  iceFallback?: IceFallback;
 }
 
 /** IG true-OHLC candles first. Weekly and long daily history stay on the free feed. */
@@ -290,16 +318,34 @@ export const markets: Market[] = [
     id: "cocoa",
     name: "London Cocoa",
     group: "Softs/Grains",
-    units: "USD/t",
+    units: "GBP/t",
     assetClass: "future",
     decimals: 0,
-    contract: { root: "CC", venue: "NYB", months: "HKNUZ", expiryMonthOffset: 0, expiryDay: 15, minDaysToExpiry: 25 },
-    continuous: "CC=F",
-    proxyNote:
-      "Proxy for London cocoa. This is NY ICE cocoa in USD per tonne, not London cocoa in GBP per tonne. Different exchange, currency, and contract.",
+    ticker: "ICE:C",
+    source: "ice",
+    ice: {
+      specId: 37089076,
+      productId: 15246,
+      hubId: 17450,
+      label: "ICE London Cocoa, delayed, close-based, GBP/t",
+      compareMarketId: "us-cocoa",
+      compareLabel: "NY cocoa OHLC",
+    },
+    iceFallback: {
+      kind: "yahoo",
+      contract: { root: "CC", venue: "NYB", months: "HKNUZ", expiryMonthOffset: 0, expiryDay: 15, minDaysToExpiry: 25 },
+      units: "USD/t",
+      note: "ICE London cocoa did not load. This is the old stand-in: NY ICE cocoa in USD per tonne, not London cocoa in GBP per tonne. It has not been converted with GBPUSD.",
+    },
+    exactness: "exact",
+    ric: "LCCc1",
+    licence: ICE_LICENCE,
+    attribution: "ICE Futures Europe",
+    alsoIn: "LSEG · Cocoa",
+    delayNote: "Delayed. Close-only.",
+    infoNote: "ICE London Cocoa, delayed, close-based, GBP/t. Front skips a contract whose delivery month starts within 14 days, so Dec 2026 is not the default. NY cocoa (CC, USD/t) is an optional true-OHLC comparison, not this price, and it is not multiplied by GBPUSD. The ICE charting endpoints are undocumented and may change.",
     curve: {
-      count: 10,
-      note: "NY cocoa (CC, USD/t) is the public stand-in for London cocoa (GBP/t). This is not the London curve. Months Yahoo does not return are gaps. IG points, when shown, are a separate series and are not stitched onto this curve.",
+      note: "ICE London cocoa (GBP/t), delayed lasts, including a month the chart has rolled off. Months the list does not return are absent. Not the NY cocoa curve. IG points are a separate series and are not stitched onto this curve.",
     },
     igEpic: "CC.D.LCC.USS.IP",
     sourceChain: IG_THEN_FREE,
@@ -329,16 +375,34 @@ export const markets: Market[] = [
     id: "sugar",
     name: "London Sugar No.5",
     group: "Softs/Grains",
-    units: "USc/lb",
+    units: "USD/t",
     assetClass: "future",
-    decimals: 2,
-    contract: { root: "SB", venue: "NYB", months: "HKNV", expiryMonthOffset: -1, expiryDay: 15 },
-    continuous: "SB=F",
-    proxyNote:
-      "Proxy for London white sugar No.5. This is NY raw sugar No.11 in US cents per pound, not London No.5 in USD per tonne. Different contract and units.",
+    decimals: 1,
+    ticker: "ICE:W",
+    source: "ice",
+    ice: {
+      specId: 37089080,
+      productId: 15249,
+      hubId: 17453,
+      label: "ICE White Sugar, delayed, close-based, USD/t",
+      compareMarketId: "sugar-11",
+      compareLabel: "No.11 OHLC",
+    },
+    iceFallback: {
+      kind: "yahoo",
+      contract: { root: "SB", venue: "NYB", months: "HKNV", expiryMonthOffset: -1, expiryDay: 15 },
+      units: "USc/lb",
+      note: "ICE white sugar did not load. This is the old stand-in: NY raw sugar No.11 in US cents per pound, not London No.5 in USD per tonne.",
+    },
+    exactness: "exact",
+    ric: "LSUc1",
+    licence: ICE_LICENCE,
+    attribution: "ICE Futures Europe",
+    alsoIn: "LSEG · Main",
+    delayNote: "Delayed. Close-only.",
+    infoNote: "ICE White Sugar, delayed, close-based, USD/t. ICE quotes white sugar in US dollars per tonne, not pounds. No.11 (SB) is an optional true-OHLC comparison. The ICE charting endpoints are undocumented and may change.",
     curve: {
-      count: 8,
-      note: "NY sugar No.11 (SB, USc/lb), listed Mar, May, Jul, Oct. Proxy only — London No.5 (USD/t) is not this curve. Missing months are gaps. IG points are not stitched onto this curve.",
+      note: "ICE white sugar No.5 (USD/t), delayed lasts. Months the charting list does not return are absent. Not NY sugar No.11. IG points are not stitched onto this curve.",
     },
     igEpic: "CC.D.LSU.USS.IP",
     sourceChain: IG_THEN_FREE,

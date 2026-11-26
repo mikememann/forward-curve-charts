@@ -87,6 +87,10 @@ export interface OhlcResponse {
   /** Which feed produced these bars. */
   priceSource?: "ig" | "free";
   igAllowance?: { remaining: number; total: number; expirySeconds: number } | null;
+  /** ICE delivery months, when this chart is an ICE contract. */
+  iceContracts?: { marketId: number; strip: string; label: string; nearExpiry?: boolean }[];
+  /** Strip actually plotted, e.g. "Dec26". */
+  iceStrip?: string | null;
   error?: string;
 }
 
@@ -144,7 +148,7 @@ export interface CurveResponse {
   name: string;
   units: string;
   decimals: number;
-  source: "Yahoo Finance";
+  source: string;
   delayNote: string;
   fetchedAt: string;
   note: string;

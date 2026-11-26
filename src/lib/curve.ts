@@ -9,6 +9,7 @@ import { yahooChart } from "@/lib/yahoo";
 const DAY = 86_400;
 
 export async function loadCurve(def: CurveDef, now = new Date()): Promise<CurveResponse> {
+  if (!def.spec) throw new Error(`No Yahoo contract spec for ${def.id}`);
   const contracts = curveContractList(def.spec, def.count + 2, now);
   const nowSec = Math.floor(now.getTime() / 1000);
   const fetched = await mapPool(contracts, 6, async (c) => {

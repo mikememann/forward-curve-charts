@@ -1,4 +1,4 @@
-import { extraCurves, markets, type Exactness, type ExtraCurve, type Market, type NativeFrequency, type SourceKind } from "@/config/markets";
+import { extraCurves, markets, type Exactness, type ExtraCurve, type IceFallback, type IceProduct, type Market, type NativeFrequency, type SourceKind } from "@/config/markets";
 import type { SourceChain } from "@/lib/types";
 import { lsegMarkets } from "@/config/lseg";
 import { resolveContract, type ContractInfo } from "@/lib/contracts";
@@ -14,7 +14,9 @@ export interface CurveDef {
   decimals: number;
   note: string;
   count: number;
-  spec: NonNullable<Market["contract"]>;
+  spec: NonNullable<Market["contract"]> | null;
+  /** ICE charting curve. `spec` is null and loadCurve is not used. */
+  ice: boolean;
   marketId: string | null;
 }
 
@@ -53,12 +55,28 @@ export interface MarketView {
   igEpic: string | null;
   igEpicAlt: string | null;
   sourceChain: SourceChain | null;
+  ice: IceProduct | null;
+  iceFallback: IceFallback | null;
 }
 
 export function allCurves(): CurveDef[] {
   const fromMarkets: CurveDef[] = [];
   for (const m of catalog()) {
     if (!m.curve) continue;
+    if (m.source === "ice" && m.ice) {
+      fromMarkets.push({
+        id: m.id,
+        name: m.name,
+        units: m.units,
+        decimals: m.decimals ?? 2,
+        note: m.curve.note,
+        count: m.curve.count ?? 12,
+        spec: null,
+        ice: true,
+        marketId: m.id,
+      });
+      continue;
+    }
     const spec = m.curve.spec ?? m.contract;
     if (!spec) continue;
     fromMarkets.push({
@@ -69,6 +87,7 @@ export function allCurves(): CurveDef[] {
       note: m.curve.note,
       count: m.curve.count ?? 12,
       spec,
+      ice: false,
       marketId: m.id,
     });
   }
@@ -80,6 +99,7 @@ export function allCurves(): CurveDef[] {
     note: c.note,
     count: c.count ?? 12,
     spec: c.spec,
+    ice: false,
     marketId: null,
   }));
   return [...fromMarkets, ...extras];
@@ -124,6 +144,8 @@ export function presentMarket(m: Market, now = new Date()): MarketView {
     igEpic: m.igEpic ?? null,
     igEpicAlt: m.igEpicAlt ?? null,
     sourceChain: m.sourceChain ?? null,
+    ice: m.ice ?? null,
+    iceFallback: m.iceFallback ?? null,
   };
 }
 
