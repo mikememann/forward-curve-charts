@@ -85,7 +85,7 @@ export async function buildDailyHistory(opts: {
     );
   }
 
-  const key = `hist:2:${market?.id ?? opts.ticker}:${opts.strip || "front"}:${opts.ticker}:1d`;
+  const key = `hist:3:${market?.id ?? opts.ticker}:${opts.strip || "front"}:${opts.ticker}:1d`;
   const now = Math.floor(Date.now() / 1000);
   const cached = historyFromCache(await readStoredJson(key));
   let bars: Bar[];
