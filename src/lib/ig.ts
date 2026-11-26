@@ -1,9 +1,7 @@
 import "server-only";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { readStoredBars, writeStoredBars } from "@/lib/barStore";
 import { igCall } from "@/lib/igAllow";
-import { barsFromCache, extraPageNumbers, mergeBars, pageQuery, parseIgPrices, priceQuery, type IgAllowance, type IgPageData, type IgPricesBody } from "@/lib/igParse";
+import { extraPageNumbers, mergeBars, pageQuery, parseIgPrices, priceQuery, type IgAllowance, type IgPageData, type IgPricesBody } from "@/lib/igParse";
 import type { Bar, Timeframe } from "@/lib/types";
 
 /**
@@ -94,46 +92,11 @@ function storeKey(epic: string, resolution: string): string {
 }
 
 async function readBars(key: string): Promise<Bar[]> {
-  const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (kvUrl && kvToken) {
-    const res = await fetch(`${kvUrl}/get/${encodeURIComponent(key)}`, {
-      headers: { Authorization: `Bearer ${kvToken}` },
-    });
-    if (!res.ok) return [];
-    const body: unknown = await res.json();
-    return barsFromCache(body) ?? [];
-  }
-  try {
-    const raw = await readFile(fileFor(key), "utf8");
-    return barsFromCache(raw) ?? [];
-  } catch {
-    return [];
-  }
+  return readStoredBars(key);
 }
 
 async function writeBars(key: string, bars: Bar[]): Promise<void> {
-  const payload = JSON.stringify(bars);
-  const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (kvUrl && kvToken) {
-    // Command form stores one JSON string. POST /set with a JSON array body
-    // can be read as a pipeline, and stringifying a string stores an extra pair of quotes.
-    await fetch(kvUrl, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${kvToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify(["SET", key, payload]),
-    });
-    return;
-  }
-  const file = fileFor(key);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, payload);
-}
-
-function fileFor(key: string): string {
-  const dir = process.env.IG_CACHE_DIR || path.join(os.tmpdir(), "mm-charts-ig");
-  return path.join(dir, `${key.replace(/[^a-zA-Z0-9._-]+/g, "_")}.json`);
+  await writeStoredBars(key, bars);
 }
 
 export async function loadIgBars(epic: string, timeframe: "15m" | "1h" | "1d", want: number): Promise<{ bars: Bar[]; allowance: IgAllowance | null }> {
