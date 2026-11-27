@@ -122,7 +122,8 @@ export function ChartWorkspace() {
       setDesk(base);
     }
     setHydrated(true);
-    const mq = window.matchMedia("(max-width: 900px)");
+    // Keep this in step with the mobile rules in globals.css.
+    const mq = window.matchMedia("(max-width: 960px)");
     const apply = () => setNarrow(mq.matches);
     apply();
     mq.addEventListener("change", apply);
