@@ -5,6 +5,7 @@ import { formatChange, formatPct, formatPrice } from "@/lib/format";
 import { formatAge } from "@/lib/time";
 import type { Quote } from "@/lib/types";
 import type { MarketView } from "@/lib/marketModel";
+import { watchlistMatches } from "@/lib/watchlistFilter";
 import { useEffect, useState } from "react";
 
 export interface CustomSymbol {
@@ -29,6 +30,7 @@ interface Props {
 
 export function Watchlist(props: Props) {
   const [q, setQ] = useState("");
+  const [filter, setFilter] = useState("");
   const [hits, setHits] = useState<{ symbol: string; name: string; type: string; exchange: string }[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [igNote, setIgNote] = useState<string | null>(null);
@@ -105,6 +107,22 @@ export function Watchlist(props: Props) {
   const [spreadName, setSpreadName] = useState("");
   const [spreadFormula, setSpreadFormula] = useState("");
   const groups = [...GROUPS, "Custom"] as const;
+  const filtering = filter.trim().length > 0;
+  const igShown = igRows.filter((row) => watchlistMatches(filter, [row.name, row.sub, row.id, "IG"]));
+  const groupBlocks = groups.map((group) => {
+    const rows = group === "Custom"
+      ? props.custom
+          .filter((c) => watchlistMatches(filter, [c.name, c.ticker, group]))
+          .map((c) => ({ id: `custom:${c.ticker}`, name: c.name, sub: c.ticker, removable: c.ticker, exactness: null as string | null }))
+      : props.markets.filter((m) => (m.group === group || m.alsoIn === group) && watchlistMatches(filter, [m.name, m.ticker, m.continuous, m.contractTicker, m.contractLabel, m.ric, group])).map((m) => {
+          const quote = props.quotes[m.id];
+          const sub = quote?.contractLabel || (m.preferContinuous ? m.ticker : m.contractLabel ?? m.ticker);
+          return { id: m.id, name: m.name, sub, removable: null as string | null, exactness: m.exactness };
+        });
+    const missing = props.unavailable.filter((u) => u.group === group && watchlistMatches(filter, [u.name, u.ric, u.group]));
+    if (!rows.length && !missing.length) return null;
+    return { group, rows, missing };
+  }).filter((block) => block != null);
 
   return (
     <aside className="sidebar">
@@ -115,11 +133,30 @@ export function Watchlist(props: Props) {
           <em>Mendelsohn</em>
         </div>
       </div>
+      <div className="wl-filter">
+        <input
+          value={filter}
+          placeholder="Filter markets"
+          aria-label="Filter markets"
+          onChange={(e) => setFilter(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setFilter("");
+              e.currentTarget.blur();
+            }
+          }}
+          autoComplete="off"
+        />
+        {filter && (
+          <button type="button" className="wl-filter-x" aria-label="Clear filter" onClick={() => setFilter("")}>×</button>
+        )}
+      </div>
       <div className="wl-scroll">
+        {(!filtering || igShown.length > 0) && (
         <section>
           <h3>IG · MM</h3>
-          {igNote && <p className="wl-sub" style={{ padding: "6px 12px" }}>{igNote}</p>}
-          {igRows.map((row) => (
+          {!filtering && igNote && <p className="wl-sub" style={{ padding: "6px 12px" }}>{igNote}</p>}
+          {igShown.map((row) => (
             <button key={row.sub} className={`wl-row ${props.selectedId === row.id ? "active" : ""}`} type="button" onClick={() => { if (!row.id.includes(".")) props.onSelect(row.id); }}>
               <span className="wl-name"><span>{row.name}</span><i className="flag exact">IG</i></span>
               <span className="wl-sub">{row.sub}</span>
@@ -128,16 +165,8 @@ export function Watchlist(props: Props) {
             </button>
           ))}
         </section>
-        {groups.map((group) => {
-          const rows = group === "Custom"
-            ? props.custom.map((c) => ({ id: `custom:${c.ticker}`, name: c.name, sub: c.ticker, removable: c.ticker, exactness: null as string | null, unavailable: false, reason: "" }))
-            : props.markets.filter((m) => m.group === group || m.alsoIn === group).map((m) => {
-                const quote = props.quotes[m.id];
-                const sub = quote?.contractLabel || (m.preferContinuous ? m.ticker : m.contractLabel ?? m.ticker);
-                return { id: m.id, name: m.name, sub, removable: null as string | null, exactness: m.exactness, unavailable: false, reason: "" };
-              });
-          const missing = props.unavailable.filter((u) => u.group === group);
-          if (!rows.length && !missing.length) return null;
+        )}
+        {groupBlocks.map(({ group, rows, missing }) => {
           return (
             <section key={group}>
               <h3>{group}</h3>
@@ -191,6 +220,7 @@ export function Watchlist(props: Props) {
             </section>
           );
         })}
+        {filtering && igShown.length === 0 && groupBlocks.length === 0 && <p className="wl-empty">No markets match.</p>}
       </div>
       <section className="spread-box">
         <h3>Custom spreads</h3>

@@ -5,7 +5,9 @@ import { autoFibDrawing, autoForkDrawing } from "@/components/autoDraw";
 import { CurveView } from "@/components/CurveView";
 import type { CompareSeries } from "@/components/PriceChart";
 import { DEFAULT_TOGGLES, TOOL_HINT, type ChartType, type IndicatorToggles, type SeriesMode, type Tool } from "@/components/uiTypes";
+import { NotesChip, NotesPanel, useChartNotices } from "@/components/NoticeStack";
 import { Watchlist, type CustomSymbol } from "@/components/Watchlist";
+import { buildNotices } from "@/lib/notices";
 import { ChartPane, type PaneHandle, type PaneSnapshot } from "@/components/ChartPane";
 import { allCurves, presentMarkets, type MarketView } from "@/lib/marketModel";
 import { fetchCurve } from "@/lib/clientCache";
@@ -272,6 +274,22 @@ export function ChartWorkspace() {
     : seriesMode === "contract" ? viewModel?.contractLabel : null;
   const headerPrice = unavailable ? null : quote?.stale || payload?.stale ? null : quote?.last ?? (showingThis ? payload?.lastPrice ?? null : null);
   const trade = drawings.find((d): d is TradeDrawing => d.type === "trade");
+  const notices = useMemo(() => buildNotices({
+    infoNote: showingThis && payload?.infoNote ? payload.infoNote : viewModel?.infoNote,
+    proxyNote: viewModel?.proxyNote,
+    standInNote: showingThis && payload?.proxyNote && payload.proxyNote !== viewModel?.proxyNote ? payload.proxyNote : null,
+    warnings: showingThis ? payload?.warnings : [],
+    extraInfo: spread && payload?.infoNote ? payload.infoNote : null,
+    continuousNote: seriesMode === "continuous"
+      ? `Back-adjusted continuous ${ticker}. Yahoo splices the rolls, so levels and percentage changes will not match the specific contract.`
+      : null,
+    pence: Boolean(viewModel?.pence),
+    staleNote: (quote?.stale || payload?.stale)
+      ? `No fresh quote. ${payload?.staleReason || `Last updated ${quote?.lastUpdatedLabel ?? ""}. The last figure is not a current price.`}`
+      : null,
+  }), [showingThis, payload, viewModel, spread, seriesMode, ticker, quote]);
+  const noteState = useChartNotices(marketId);
+  const showNotes = layoutShown === 1 && view === "chart";
 
   return (
     <div className="app" data-ready={payload && !chartError ? "chart" : "no"}>
@@ -324,6 +342,13 @@ export function ChartWorkspace() {
               {viewModel?.pence ? " · pence, not pounds" : ""}
             </p>
           </div>
+          {showNotes && (
+            <NotesChip
+              count={notices.length}
+              open={noteState.open}
+              onToggle={() => noteState.setOpen((open) => !open)}
+            />
+          )}
           <div className={`price-block ${quote && (quote.change ?? 0) < 0 ? "down" : ""} ${quote && (quote.change ?? 0) > 0 ? "up" : ""}`}>
             <strong>{headerPrice == null ? "n/a" : formatPrice(headerPrice, quote?.decimals ?? decimals)}</strong>
             <span>
@@ -474,40 +499,47 @@ export function ChartWorkspace() {
 
         {(layoutShown > 1 || view === "chart") && (
           <>
-            {layoutShown === 1 && <div className="banners">
-              {viewModel?.exactness && (
-                <p className="source-line">
-                  {viewModel.exactness}
-                  {viewModel.ric ? ` · ${viewModel.ric}` : ""}
-                  {viewModel.licence ? ` · ${viewModel.licence}` : ""}
-                  {viewModel.attribution ? ` · ${viewModel.attribution}` : ""}
-                </p>
-              )}
-              {(payload?.infoNote || viewModel?.infoNote) && <p className="banner">{showingThis && payload?.infoNote ? payload.infoNote : viewModel?.infoNote}</p>}
-              {viewModel?.proxyNote && <p className="banner warn"><b>Proxy.</b> {viewModel.proxyNote}</p>}
-              {showingThis && payload?.proxyNote && payload.proxyNote !== viewModel?.proxyNote && <p className="banner warn"><b>Stand-in.</b> {payload.proxyNote}</p>}
-              {showingThis && payload?.warnings.map((w) => <p key={w} className="banner warn">{w}</p>)}
-              {spread && payload?.infoNote && <p className="banner">{payload.infoNote}</p>}
-              {seriesMode === "continuous" && <p className="banner warn"><b>Back-adjusted continuous {ticker}.</b> Yahoo splices the rolls, so levels and percentage changes will not match the specific contract.</p>}
-              {viewModel?.pence && <p className="banner">Quoted in pence (p), not pounds.</p>}
-              {(quote?.stale || payload?.stale) && <p className="banner warn"><b>No fresh quote.</b> {payload?.staleReason || `Last updated ${quote?.lastUpdatedLabel}. The last figure is not a current price.`}</p>}
-              {showingThis && payload?.priceSource && (
-                <p className="source-line">
-                  Live source: {payload.priceSource === "ig" ? "IG price (IG points)" : payload.source}
-                  {payload.igAllowance ? ` · allowance ${payload.igAllowance.remaining.toLocaleString("en-GB")} / ${payload.igAllowance.total.toLocaleString("en-GB")}` : ""}
-                </p>
-              )}
-              {payload?.warnings?.map((w) => <p key={w} className="banner warn">{w}</p>)}
-              {payload && (
-                <p className="source-line">
-                  {payload.source} · {payload.delayNote} Times are UK (Europe/London). Last bar {payload.lastBarUnix ? formatLondon(payload.lastBarUnix) : "n/a"}
-                  {" · "}quote {formatAge(payload.quoteTimeUnix ? now / 1000 - payload.quoteTimeUnix : payload.ageSeconds)}
-                  {payload.instrumentName ? ` · ${payload.instrumentName}` : ""}
-                  {payload.currency ? ` · ${payload.currency}` : ""}
-                </p>
-              )}
-              {status && <p className="source-line hint">{status}</p>}
-            </div>}
+            {layoutShown === 1 && (
+              <>
+                <NotesPanel
+                  notices={notices}
+                  dismissed={noteState.dismissed}
+                  open={noteState.open}
+                  onOpen={() => noteState.setOpen(true)}
+                  onDismiss={(text) => noteState.dismiss([text])}
+                  onRestore={(text) => noteState.restore([text])}
+                  onDismissAll={() => {
+                    noteState.dismiss(notices.map((note) => note.text));
+                    noteState.setOpen(false);
+                  }}
+                />
+                <div className="meta-lines">
+                  {viewModel?.exactness && (
+                    <p className="source-line">
+                      {viewModel.exactness}
+                      {viewModel.ric ? ` · ${viewModel.ric}` : ""}
+                      {viewModel.licence ? ` · ${viewModel.licence}` : ""}
+                      {viewModel.attribution ? ` · ${viewModel.attribution}` : ""}
+                    </p>
+                  )}
+                  {showingThis && payload?.priceSource && (
+                    <p className="source-line">
+                      Live source: {payload.priceSource === "ig" ? "IG price (IG points)" : payload.source}
+                      {payload.igAllowance ? ` · allowance ${payload.igAllowance.remaining.toLocaleString("en-GB")} / ${payload.igAllowance.total.toLocaleString("en-GB")}` : ""}
+                    </p>
+                  )}
+                  {payload && (
+                    <p className="source-line">
+                      {payload.source} · {payload.delayNote} Times are UK (Europe/London). Last bar {payload.lastBarUnix ? formatLondon(payload.lastBarUnix) : "n/a"}
+                      {" · "}quote {formatAge(payload.quoteTimeUnix ? now / 1000 - payload.quoteTimeUnix : payload.ageSeconds)}
+                      {payload.instrumentName ? ` · ${payload.instrumentName}` : ""}
+                      {payload.currency ? ` · ${payload.currency}` : ""}
+                    </p>
+                  )}
+                  {status && <p className="source-line hint">{status}</p>}
+                </div>
+              </>
+            )}
             {layoutShown === 1 && showingThis && bar && (
               <div className="legend-strip">
                 <span>O {fmt(bar.open, decimals)}</span>

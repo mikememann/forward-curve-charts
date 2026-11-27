@@ -28,6 +28,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .brand-mark { width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; background: #1b2030; color: var(--amber); font-weight: 600; letter-spacing: 0.04em; }
 .brand strong { display: block; font-size: 14px; }
 .brand em { display: block; font-style: normal; color: var(--muted); font-size: 12px; }
+.wl-filter { position: relative; padding: 8px 10px 0; }
+.wl-filter input { width: 100%; background: #0e1117; border: 1px solid var(--line); border-radius: 4px; padding: 7px 28px 7px 8px; }
+.wl-filter-x { position: absolute; right: 14px; top: 12px; width: 22px; height: 22px; padding: 0; color: var(--muted); }
+.wl-empty { margin: 8px 12px; color: var(--muted); font-size: 12px; }
 .wl-scroll { overflow: auto; flex: 1; padding: 8px 8px 12px; }
 .wl-scroll h3 { margin: 12px 8px 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
 .wl-row { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "name px" "sub chg" "age age"; width: 100%; text-align: left; padding: 7px 8px; border-radius: 6px; gap: 0 8px; }
@@ -64,6 +68,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .search-error { color: var(--down); font-size: 12px; margin: 6px 0 0; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.main > * { min-width: 0; max-width: 100%; }
 .topbar { display: flex; align-items: center; gap: 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .nav-btn { display: none; border: 1px solid var(--line); padding: 6px 10px; }
 .title-block { min-width: 0; }
@@ -71,6 +76,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .title-block h1 span { color: var(--muted); font-weight: 500; }
 .ticker-line { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
 .mono { font-family: var(--mono); }
+.notes-chip { margin-left: auto; border: 1px solid var(--line); background: #161b26; color: #d7dde6; font-size: 12px; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.notes-chip.on { background: #2a3348; border-color: #3d4b68; color: white; }
+.topbar .notes-chip + .price-block { margin-left: 12px; }
 .price-block { margin-left: auto; text-align: right; }
 .price-block strong { display: block; font-size: 22px; font-family: var(--mono); font-weight: 500; }
 .price-block span, .price-block em { display: block; font-style: normal; font-size: 12px; color: var(--muted); font-family: var(--mono); }
@@ -94,9 +102,17 @@ button.on, .toggle.on { background: #2a3348; color: white; border-color: #3d4b68
 .view-switch { margin-left: auto; }
 .danger { color: #ff8a80; border-color: #ef5350 !important; }
 
-.banners { padding: 6px 12px 0; display: grid; gap: 4px; }
-.banner { margin: 0; padding: 6px 8px; border-radius: 4px; background: #1b2030; font-size: 12.5px; line-height: 1.4; }
+.banners { padding: 6px 12px 0; display: grid; gap: 4px; min-width: 0; max-width: 100%; }
+.banner { margin: 0; padding: 6px 8px; border-radius: 4px; background: #1b2030; font-size: 12.5px; line-height: 1.4; display: flex; gap: 8px; align-items: flex-start; min-width: 0; max-width: 100%; overflow: hidden; }
+.banner p { margin: 0; flex: 1; min-width: 0; overflow-wrap: break-word; }
 .banner.warn { background: #3a2e12; color: #ffe0b2; }
+.notice-x { flex: none; width: 22px; height: 22px; padding: 0; color: inherit; font-size: 14px; line-height: 1; overflow: hidden; }
+.notice-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; color: var(--muted); font-size: 12px; }
+.notice-actions button, .notice-clear { border: 1px solid var(--line); background: #161b26; color: var(--muted); font-size: 12px; padding: 2px 8px; }
+.notice-summary { display: flex; align-items: center; gap: 8px; margin: 6px 12px 0; padding: 4px 8px; border-radius: 4px; background: #1b2030; min-width: 0; max-width: calc(100% - 24px); }
+.notice-summary.has-warn { box-shadow: inset 3px 0 0 #ffb300; }
+.notice-text { flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12.5px; padding: 2px 0; }
+.meta-lines { padding: 4px 12px 0; display: grid; gap: 2px; }
 .source-line { margin: 0; color: var(--muted); font-size: 12px; }
 .hint { color: #ffe082; }
 .legend-strip { display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 12px; font-family: var(--mono); font-size: 12px; color: #d7dde6; border-bottom: 1px solid var(--line); }
